@@ -8,7 +8,7 @@
     "build:html": "node scripts/build-html.mjs",
     "dev": "node scripts/build-html.mjs && wrangler dev",
     "deploy": "node scripts/build-html.mjs && wrangler deploy",
-    "test": "node --no-warnings --test tests/worker.test.mjs tests/migration.test.mjs",
+    "test": "node --no-warnings --test tests/worker.test.mjs tests/migration.test.mjs tests/top-words.test.mjs",
     "d1:create": "wrangler d1 create trace-db",
     "d1:apply:local": "wrangler d1 execute trace-db --local --file=./schema.sql",
     "d1:apply:remote": "wrangler d1 execute trace-db --remote --file=./schema.sql"

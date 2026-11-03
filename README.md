@@ -31,7 +31,7 @@ An LLM never decides dates or amounts. It only classifies the phrase; code parse
 - **Money.** Voice expenses with categories, a daily limit, a spending chart for 7 and 30 days, past days ("yesterday"), several currencies with live exchange rates, debts, and monthly recurring payments.
 - **Tasks.** Dates from natural speech, reminders in Telegram with "done" and "snooze" buttons.
 - **Notes.** Full phrase kept with tags and search.
-- **Words.** Your own cards with reminders, plus a Top-1000 English course in 50 groups of 20 words with 4-choice tests. A group unlocks the next one after three perfect runs.
+- **Words.** Your own cards with reminders, plus a Top-1000 English course in 50 groups of 20 words. Every word comes in a short example sentence with a translation, and the 4-choice tests alternate between "what does the word mean here" and "fill in the missing word". A group unlocks the next one after three perfect runs.
 - **Voice edits.** "Change the last expense to 90 thousand" or "delete that note" works on the right record and never touches someone else's.
 - **Many users.** Free trial, then a 30-day subscription paid in Telegram Stars. Daily record limits, refunds, owner commands (`/users`, `/grant`, `/revoke`, `/usage`, `/journal`), terms of service and a "delete all my data" button.
 

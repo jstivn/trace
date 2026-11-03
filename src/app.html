@@ -273,6 +273,15 @@
       width: 100%; min-height: 240px; padding: var(--s6) var(--s5);
       background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-xl); text-align: center;
     }
+    #view-words.words-focus .view-head, #view-words.words-focus .segmented { display: none; }
+    .quiz-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
+    .quiz-card { min-height: 112px; padding: var(--s4) var(--s5); gap: var(--s1); }
+    .card-sent { font-size: 1.3rem; font-weight: 600; line-height: 1.3; letter-spacing: -0.005em; overflow-wrap: anywhere; }
+    .card-sent mark { background: var(--accent-soft); color: var(--accent); border-radius: 4px; padding: 0 3px; }
+    .card-sent .blank { display: inline-block; min-width: 3.4em; border-bottom: 2px solid var(--accent); }
+    .card-sent-ru { font-size: var(--text-secondary); color: var(--ink-2); line-height: 1.35; }
+    .card-sent-ru.is-hidden { visibility: hidden; }
+    .quiz-ask { color: var(--ink-2); font-size: var(--text-secondary); }
     .card-word { font-size: 2rem; font-weight: 600; line-height: 1.15; letter-spacing: -0.01em; overflow-wrap: anywhere; }
     .card-phon { font-size: var(--text-secondary); color: var(--ink-2); }
     .card-back { margin-top: var(--s4); padding-top: var(--s4); border-top: 1px solid var(--line); width: 100%; }
@@ -292,8 +301,9 @@
     .sub-card .btn { width: 100%; margin-top: var(--s2); }
     .top-stack { display: grid; gap: var(--s3); }
     .kind.k-num { font-weight: 600; font-variant-numeric: tabular-nums; }
-    .quiz-opts { display: grid; gap: var(--s2); margin-top: var(--s3); }
+    .quiz-opts { display: grid; gap: var(--s2); }
     .quiz-opts .btn { width: 100%; justify-content: flex-start; text-align: left; height: auto; min-height: 48px; padding-top: 10px; padding-bottom: 10px; }
+    .quiz-next { position: sticky; bottom: calc(var(--dock-h) + env(safe-area-inset-bottom) + var(--s3)); z-index: 5; width: 100%; box-shadow: 0 6px 18px rgba(0, 0, 0, .14); }
     .quiz-opts .btn.is-right { border-color: #2F7D4F; background: rgba(47, 125, 79, .16); }
     .quiz-opts .btn.is-wrong { border-color: var(--danger); background: rgba(143, 31, 46, .14); }
     .top-score { font-size: 3rem; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; }
@@ -1509,6 +1519,17 @@
     function topUnlocked(n) { return n <= 1 || ((T.groups[n - 1] || {}).perfect || 0) >= TOP_NEED; }
 
     function topWordsOf(g) { return g ? T.words.slice((g - 1) * TOP_SIZE, g * TOP_SIZE) : T.words; }
+    // a word's mini-sentence is stored as "I {have} a car."; the braces mark the word
+    function sentenceParts(w) {
+      const m = /^(.*?)\{([^{}]+)\}(.*)$/.exec(w.sentence || '');
+      return m ? { before: m[1], hit: m[2], after: m[3] } : null;
+    }
+    function sentenceHtml(w, blank) {
+      const p = sentenceParts(w);
+      if (!p) return esc(w.word);
+      return esc(p.before) + (blank ? '<span class="blank">&nbsp;</span>' : '<mark>' + esc(p.hit) + '</mark>') + esc(p.after);
+    }
+    function plainSentence(w) { return (w.sentence || '').replace(/[{}]/g, ''); }
     function shuffled(a) {
       const r = a.slice();
       for (let i = r.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [r[i], r[j]] = [r[j], r[i]]; }
@@ -1552,6 +1573,7 @@
     function renderTop() {
       const body = $('wordsBody');
       if (!T.words) { loadTop(); return; }
+      $('view-words').classList.toggle('words-focus', T.screen === 'study' || T.screen === 'quiz');
       if (T.screen === 'study') return renderTopStudy(body);
       if (T.screen === 'quiz') return renderTopQuiz(body);
       if (T.screen === 'result') return renderTopResult(body);
@@ -1592,7 +1614,8 @@
           '</div>' +
           '<ul class="cards">' + list.map(w =>
             '<li class="card-item"><div class="row"><span class="row-main"><span class="row-title" lang="en">' + esc(w.word) + '</span>' +
-            '<span class="row-meta">' + esc([w.translation, w.phonetic].filter(Boolean).join(', ')) + '</span></span></div></li>').join('') + '</ul>' +
+            '<span class="row-meta">' + esc([w.translation, w.phonetic].filter(Boolean).join(', ')) + '</span>' +
+            (sentenceParts(w) ? '<span class="row-meta" lang="en">' + esc(plainSentence(w)) + '</span>' : '') + '</span></div></li>').join('') + '</ul>' +
         '</div>';
     }
 
@@ -1604,10 +1627,14 @@
         '<div class="top-stack">' +
           '<button type="button" class="btn" data-action="top-group" data-id="' + T.group + '">' + icon('left') + 'Группа ' + T.group + '</button>' +
           '<div class="card">' +
-            '<p class="card-word" lang="en">' + esc(w.word) + '</p>' +
-            (w.phonetic ? '<p class="card-phon">' + esc(w.phonetic) + '</p>' : '') +
+            (sentenceParts(w)
+              ? '<p class="card-sent" lang="en">' + sentenceHtml(w) + '</p>' +
+                '<p class="card-phon" lang="en">' + esc(w.word) + (w.phonetic ? ' ' + esc(w.phonetic) : '') + '</p>'
+              : '<p class="card-word" lang="en">' + esc(w.word) + '</p>' +
+                (w.phonetic ? '<p class="card-phon">' + esc(w.phonetic) + '</p>' : '')) +
             (T.flipped
-              ? '<div class="card-back"><p class="card-trans">' + esc(w.translation) + '</p></div>'
+              ? '<div class="card-back">' + (sentenceParts(w) ? '<p class="card-sent-ru">' + esc(w.sentence_ru) + '</p>' : '') +
+                '<p class="card-trans">' + (sentenceParts(w) ? '<span lang="en">' + esc(w.word) + '</span> — ' : '') + esc(w.translation) + '</p></div>'
               : '<button type="button" class="btn primary" data-action="top-flip" style="margin-top:16px">Показать перевод</button>') +
           '</div>' +
           '<div class="card-nav">' +
@@ -1632,9 +1659,22 @@
     function topStartTest(group) {
       if (group && !topUnlocked(group)) return;
       const pool = group ? topWordsOf(group) : shuffled(T.words).slice(0, TOP_SIZE);
-      const qs = shuffled(pool).map(w => {
+      const withSentence = T.words.filter(x => sentenceParts(x));
+      // questions alternate: "what does the word mean here" and "fill in the missing word" (the latter only for words with a sentence)
+      const qs = shuffled(pool).map((w, i) => {
+        const p = sentenceParts(w);
+        if (p && i % 2 === 1) {
+          const atStart = !p.before.trim();
+          const fit = s => s === 'I' ? s : (atStart ? s.charAt(0).toUpperCase() + s.slice(1) : s.toLowerCase());
+          // one wrong option comes from words of a similar rank (often the same kind: "it" next to "he"), two are random: not trivial, and rarely a second right answer
+          const others = withSentence.filter(x => x.word.toLowerCase() !== w.word.toLowerCase());
+          const near = shuffled(others.filter(x => Math.abs(x.id - w.id) <= 30)).slice(0, 1);
+          const far = shuffled(others.filter(x => !near.includes(x))).slice(0, 3 - near.length);
+          const wrongWords = near.concat(far).map(x => fit(x.word));
+          return { w, type: 'cloze', options: shuffled([p.hit].concat(wrongWords)), answer: p.hit, picked: null };
+        }
         const wrong = shuffled(T.words.filter(x => x.id !== w.id && x.translation !== w.translation)).slice(0, 3);
-        return { w, options: shuffled([w].concat(wrong)).map(x => x.translation), picked: null };
+        return { w, type: 'meaning', options: shuffled([w].concat(wrong)).map(x => x.translation), answer: w.translation, picked: null };
       });
       T.quiz = { group, qs, i: 0 };
       T.screen = 'quiz';
@@ -1648,18 +1688,27 @@
       const answered = cur.picked != null;
       const opts = cur.options.map((o, k) => {
         let cls = 'btn';
-        if (answered && o === cur.w.translation) cls += ' is-right';
+        if (answered && o === cur.answer) cls += ' is-right';
         else if (answered && k === cur.picked) cls += ' is-wrong';
         return '<button type="button" class="' + cls + '" data-action="top-answer" data-id="' + k + '"' + (answered ? ' disabled' : '') + '>' + esc(o) + '</button>';
       }).join('');
       body.innerHTML =
         '<div class="top-stack">' +
-          '<div class="top-head"><p>' + (q.group ? 'Группа ' + q.group : 'Общий тест') + ' · вопрос ' + (q.i + 1) + ' из ' + q.qs.length + '</p>' +
+          '<div class="top-head"><div class="quiz-bar"><button type="button" class="btn" data-action="top-quit">' + icon('left') + 'Выйти</button>' +
+            '<p>' + (q.group ? 'Группа ' + q.group : 'Общий тест') + ' · вопрос ' + (q.i + 1) + ' из ' + q.qs.length + '</p></div>' +
             '<div class="top-bar"><span style="width:' + Math.round(q.i / q.qs.length * 100) + '%"></span></div></div>' +
-          '<div class="card"><p class="card-word" lang="en">' + esc(cur.w.word) + '</p>' +
-            (cur.w.phonetic ? '<p class="card-phon">' + esc(cur.w.phonetic) + '</p>' : '') + '</div>' +
+          (cur.type === 'cloze'
+            ? '<p class="quiz-ask">Вставьте пропущенное слово</p>' +
+              '<div class="card quiz-card"><p class="card-sent-ru">' + esc(cur.w.sentence_ru) + '</p>' +
+                '<p class="card-sent" lang="en">' + sentenceHtml(cur.w, !answered) + '</p></div>'
+            : sentenceParts(cur.w)
+              ? '<p class="quiz-ask">Что значит <b lang="en">' + esc(cur.w.word) + '</b> в этом предложении?</p>' +
+                '<div class="card quiz-card"><p class="card-sent" lang="en">' + sentenceHtml(cur.w) + '</p>' +
+                  '<p class="card-sent-ru' + (answered ? '' : ' is-hidden') + '">' + esc(cur.w.sentence_ru) + '</p></div>'
+              : '<div class="card quiz-card"><p class="card-word" lang="en">' + esc(cur.w.word) + '</p>' +
+                (cur.w.phonetic ? '<p class="card-phon">' + esc(cur.w.phonetic) + '</p>' : '') + '</div>') +
           '<div class="quiz-opts">' + opts + '</div>' +
-          (answered ? '<button type="button" class="btn primary" data-action="top-after">' + (q.i === q.qs.length - 1 ? 'Показать результат' : 'Дальше') + '</button>' : '') +
+          (answered ? '<button type="button" class="btn primary quiz-next" data-action="top-after">' + (q.i === q.qs.length - 1 ? 'Показать результат' : 'Дальше') + '</button>' : '') +
         '</div>';
     }
 
@@ -1667,14 +1716,14 @@
       const cur = T.quiz.qs[T.quiz.i];
       if (cur.picked != null) return;
       cur.picked = k;
-      haptic(cur.options[k] === cur.w.translation ? 'success' : 'warning');
+      haptic(cur.options[k] === cur.answer ? 'success' : 'warning');
       renderTop();
     }
 
     function topAfterAnswer() {
       const q = T.quiz;
       if (q.i < q.qs.length - 1) { q.i++; renderTop(); return; }
-      const right = q.qs.filter(x => x.options[x.picked] === x.w.translation).length;
+      const right = q.qs.filter(x => x.options[x.picked] === x.answer).length;
       q.right = right;
       q.score = Math.round(right / q.qs.length * 100);
       topSaveProgress({ group: q.group, score: q.score });
@@ -1684,7 +1733,7 @@
 
     function renderTopResult(body) {
       const q = T.quiz;
-      const wrong = q.qs.filter(x => x.options[x.picked] !== x.w.translation);
+      const wrong = q.qs.filter(x => x.options[x.picked] !== x.answer);
       const perfect = q.group ? ((T.groups[q.group] || {}).perfect || 0) : 0;
       let note;
       if (!q.group) note = q.score + '%.';
@@ -1700,7 +1749,9 @@
           (wrong.length
             ? '<div><h3 style="margin:0 0 8px">Ошибки</h3><ul class="cards">' + wrong.map(x =>
                 '<li class="card-item"><div class="row"><span class="row-main"><span class="row-title" lang="en">' + esc(x.w.word) + '</span>' +
-                '<span class="row-meta">' + esc(x.w.translation) + '</span></span></div></li>').join('') + '</ul></div>'
+                '<span class="row-meta">' + esc(x.w.translation) + '</span>' +
+                (sentenceParts(x.w) ? '<span class="row-meta" lang="en">' + esc(plainSentence(x.w)) + '</span><span class="row-meta">' + esc(x.w.sentence_ru) + '</span>' : '') +
+                '</span></div></li>').join('') + '</ul></div>'
             : '<p class="hint">Без ошибок.</p>') +
           '<div class="actions" style="display:flex; gap:8px; flex-wrap:wrap">' +
             '<button type="button" class="btn primary" data-action="top-test" data-id="' + q.group + '">Пройти ещё раз</button>' +
@@ -2601,6 +2652,7 @@
         case 'top-test': topStartTest(id); break;
         case 'top-answer': topAnswer(id); break;
         case 'top-after': topAfterAnswer(); break;
+        case 'top-quit': haptic('light'); T.screen = T.quiz && T.quiz.group ? 'group' : 'groups'; if (T.quiz && T.quiz.group) T.group = T.quiz.group; renderTop(); break;
         case 'reload-words': loadWords(); break;
         case 'new-word': wordSheet(null); break;
         case 'debts': debtsSheet(false); break;
