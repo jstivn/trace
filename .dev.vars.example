@@ -1,0 +1,12 @@
+# Локальные переменные окружения для тестирования (wrangler dev)
+# Скопируйте в .dev.vars (файл игнорируется git)
+
+GEMINI_API_KEY="your-gemini-api-key-here"
+TELEGRAM_BOT_TOKEN="your-telegram-bot-token-here"
+TELEGRAM_CHAT_ID="your-telegram-chat-id-here"
+
+GROQ_API_KEY="your-groq-api-key-here"
+# Protects /api/* (when not opened from Telegram), /api/voice-hook, /api/sync-user, /api/cron-trigger
+AUTH_TOKEN="long-random-string"
+# Optional: must equal secret_token passed to Telegram setWebhook
+TELEGRAM_WEBHOOK_SECRET=""

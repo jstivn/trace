@@ -1,0 +1,13 @@
+.wrangler/
+node_modules/
+.dev.vars
+.env
+dist/
+worker-configuration.d.ts
+
+# private working notes and database dumps (stay on the owner's machine)
+CLAUDE.md
+PLAN-SUBSCRIPTIONS.md
+backup-*.sql
+*.sql.bak
+.claude/

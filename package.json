@@ -1,0 +1,29 @@
+{
+  "name": "tpl-trace-copilot",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "TRACE: voice-first personal assistant and Telegram Mini App on Cloudflare Workers, D1 and Gemini",
+  "main": "src/worker.js",
+  "scripts": {
+    "build:html": "node scripts/build-html.mjs",
+    "dev": "node scripts/build-html.mjs && wrangler dev",
+    "deploy": "node scripts/build-html.mjs && wrangler deploy",
+    "test": "node --no-warnings --test tests/worker.test.mjs tests/migration.test.mjs",
+    "d1:create": "wrangler d1 create trace-db",
+    "d1:apply:local": "wrangler d1 execute trace-db --local --file=./schema.sql",
+    "d1:apply:remote": "wrangler d1 execute trace-db --remote --file=./schema.sql"
+  },
+  "keywords": [
+    "cloudflare-worker",
+    "d1",
+    "gemini",
+    "telegram-mini-app",
+    "voice-assistant",
+    "second-brain"
+  ],
+  "author": "jstivn",
+  "license": "MIT",
+  "devDependencies": {
+    "wrangler": "^4.156.0"
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tpl-trace-copilot",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-10-23",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "observability": {
+    "enabled": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "trace-db",
+      "database_id": "3c4b56a0-9410-4d0c-b171-a877500aa82a"
+    }
+  ],
+  "ai": {
+    "binding": "AI"
+  },
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
+  "vars": {
+    "APP_NAME": "TRACE Copilot",
+    "GEMINI_MODEL": "gemini-3.5-flash-lite",
+    "DEFAULT_CURRENCY": "VND",
+    "USER_TIMEZONE": "Asia/Ho_Chi_Minh",
+    "SUPPORT_CONTACT": "@jstivn",
+    "SHORTCUT_URL": "https://www.icloud.com/shortcuts/2c97e20dc8af41c98049c1a3fa864d52"
+  }
+}

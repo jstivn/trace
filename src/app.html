@@ -1,0 +1,2734 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <title>Trace</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='16' fill='%23221A14'/%3E%3Cpath d='M8 22c3-1 4-9 8-9s2 7 6 7' fill='none' stroke='%23F4EFE6' stroke-width='2' stroke-linecap='round'/%3E%3Ccircle cx='23' cy='11' r='2.4' fill='%23D9482B'/%3E%3C/svg%3E">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+/*{{FONTS_CSS}}*/
+
+    /* ---------- Tokens ---------- */
+    :root {
+      --bg: #F4EFE6;
+      --surface: #FBF8F2;
+      --field: #FFFFFF;
+      --sunk: #E9E2D5;
+      --ink: #221A14;
+      --ink-2: #5C4E42;
+      --ink-3: #75665A;
+      --line: rgba(34, 26, 20, 0.12);
+      --line-strong: rgba(34, 26, 20, 0.20);
+      --accent: #BF3B1F;
+      --accent-ink: #FFFFFF;
+      --accent-soft: rgba(191, 59, 31, 0.07);
+      --danger: #8F1F2E;
+      --danger-soft: rgba(143, 31, 46, 0.08);
+      --warn-bg: #FBF1DE;
+      --warn-line: rgba(166, 108, 20, 0.25);
+      --warn-ink: #6B4A12;
+      --warn-tile: #F6DDAE;
+      --warn-icon: #7A4B05;
+      --t-money-bg: #F3DCD2; --t-money: #A8341A;
+      --t-task-bg: #DEE4EE;  --t-task: #34497A;
+      --t-note-bg: #F0E4CC;  --t-note: #7A4B05;
+      --t-word-bg: #E7E1F0;  --t-word: #5B4596;
+      --shadow-sheet: 0 -8px 32px rgba(34, 26, 20, 0.08);
+      --scrim: rgba(34, 26, 20, 0.38);
+      --focus: #BF3B1F;
+
+      --text-meta: 0.75rem;
+      --text-secondary: 0.875rem;
+      --text-body: 1rem;
+      --text-h3: 1.25rem;
+      --text-h1: 1.75rem;
+      --text-hero: 3rem;
+
+      --r-sm: 8px; --r-md: 12px; --r-lg: 16px; --r-xl: 20px;
+      --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 20px; --s6: 32px;
+
+      --hit: 44px;
+      --dock-h: 120px;
+      --page-max: 560px;
+
+      --motion-150: 150ms;
+      --motion-200: 200ms;
+      --motion-300: 300ms;
+      --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+      --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+
+      --font-ui: 'Golos Text', system-ui, -apple-system, sans-serif;
+      --font-display: 'Instrument Serif', 'Golos Text', Georgia, serif;
+    }
+
+    /* ---------- Base ---------- */
+    *, *::before, *::after { box-sizing: border-box; }
+    * { -webkit-tap-highlight-color: transparent; }
+    html { background: var(--bg); }
+    body {
+      margin: 0; background: var(--bg); color: var(--ink);
+      font-family: var(--font-ui); font-size: var(--text-body); font-weight: 400; line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+    h1, h2, h3, p { margin: 0; }
+    button, input, select, textarea { font: inherit; color: inherit; }
+    button { cursor: pointer; }
+    [hidden] { display: none !important; }
+    :focus { outline: none; }
+    :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--r-sm); }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+    .num { font-variant-numeric: tabular-nums; }
+    svg.i { width: 20px; height: 20px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+
+    /* ---------- Shell ---------- */
+    .page {
+      width: 100%; max-width: var(--page-max); margin-inline: auto;
+      padding: max(env(safe-area-inset-top), var(--s4)) var(--s5) calc(var(--dock-h) + env(safe-area-inset-bottom) + var(--s5));
+    }
+    .view-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); min-height: var(--hit); margin-bottom: var(--s4); }
+    .view-head h1 { font-size: var(--text-h1); font-weight: 600; line-height: 1.2; letter-spacing: -0.01em; }
+    .head-actions { display: flex; align-items: center; gap: var(--s1); }
+
+    .review-banner {
+      display: flex; align-items: center; gap: var(--s3); width: 100%; min-height: var(--hit);
+      margin-bottom: var(--s4); padding: var(--s3) var(--s4);
+      background: var(--warn-bg); color: var(--warn-ink); border: 1px solid var(--warn-line); border-radius: var(--r-lg);
+      text-align: left; font-size: var(--text-secondary); font-weight: 500;
+    }
+    .review-banner .grow { flex: 1; }
+
+    /* ---------- Controls ---------- */
+    .icon-btn {
+      display: inline-grid; place-items: center; width: var(--hit); height: var(--hit);
+      padding: 0; border: 0; border-radius: var(--r-md); background: transparent; color: var(--ink);
+    }
+    .icon-btn.solid { background: var(--accent); color: var(--accent-ink); }
+    @media (hover: hover) { .icon-btn:not(.solid):hover { background: var(--sunk); } }
+    /* No access (no subscription / it ended): the buttons that create things are dimmed; a tap explains and offers the subscription */
+    body.no-access :is([data-action="new-task"], [data-action="new-note"], [data-action="new-word"], [data-action="new-rec"], [data-action="mic"], #sendBtn) { opacity: .45; }
+
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: var(--s2);
+      min-height: var(--hit); padding: 0 var(--s4);
+      border: 1px solid var(--line-strong); border-radius: var(--r-md); background: var(--field); color: var(--ink);
+      font-size: var(--text-secondary); font-weight: 500; white-space: nowrap;
+    }
+    .btn.small { min-height: 36px; padding: 0 var(--s3); border-radius: 10px; }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+    .btn.danger { background: var(--danger); border-color: var(--danger); color: #FFF; }
+    .btn.danger-quiet { color: var(--danger); border-color: transparent; background: transparent; padding-inline: var(--s2); }
+    .btn.quiet { border-color: transparent; background: transparent; color: var(--accent); padding-inline: var(--s2); }
+    .btn[aria-busy="true"] { opacity: 0.7; }
+
+    .segmented { display: flex; gap: 2px; padding: 3px; margin-bottom: var(--s4); background: var(--sunk); border-radius: var(--r-md); }
+    .segmented button {
+      flex: 1; min-height: 38px; border: 0; border-radius: 9px; background: transparent;
+      color: var(--ink-2); font-size: var(--text-secondary); font-weight: 500;
+    }
+    .segmented button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 0 0 1px var(--line); }
+
+    .select-quiet {
+      appearance: none; -webkit-appearance: none; height: var(--hit); padding: 0 var(--s2);
+      border: 0; border-radius: var(--r-md); background: transparent; color: var(--accent);
+      font-size: var(--text-secondary); font-weight: 500; text-align: right;
+    }
+
+    .chips { display: flex; gap: var(--s2); overflow-x: auto; margin: 0 calc(var(--s5) * -1) var(--s4); padding: 0 var(--s5); scrollbar-width: none; }
+    .chips::-webkit-scrollbar { display: none; }
+    .chip {
+      flex: none; min-height: 36px; padding: 0 14px; border: 1px solid var(--line-strong); border-radius: 18px;
+      background: var(--surface); color: var(--ink-2); font-size: var(--text-secondary); font-weight: 500;
+    }
+    .chip[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+
+    .search { position: relative; margin-bottom: var(--s3); }
+    .search svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--ink-3); pointer-events: none; }
+    .search input {
+      width: 100%; height: var(--hit); padding: 0 var(--s3) 0 40px;
+      border: 1px solid var(--line-strong); border-radius: var(--r-md); background: var(--field); font-size: var(--text-body);
+    }
+    .search input::placeholder { color: var(--ink-3); }
+
+    /* ---------- Day: header, hero, ruler ---------- */
+    .day-nav { display: flex; align-items: center; justify-content: space-between; margin: 0 calc(var(--s3) * -1); }
+    .day-nav .date-btn {
+      min-height: var(--hit); padding: 0 var(--s2); border: 0; background: transparent; border-radius: var(--r-md);
+      font-size: var(--text-secondary); font-weight: 500; color: var(--ink-2);
+    }
+    .day-nav .side { display: flex; align-items: center; min-width: 88px; }
+    .day-nav .side.end { justify-content: flex-end; }
+    .date-input-hidden { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+
+    .hero { margin-top: var(--s2); }
+    .hero-label { font-size: var(--text-body); font-weight: 500; line-height: 1.5; color: var(--ink-2); }
+    .hero-amount { font-family: var(--font-display); font-size: 3.5rem; font-weight: 400; line-height: 1.05; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }    .hero-caption { margin-top: var(--s1); font-size: var(--text-secondary); color: var(--ink-2); }
+    .hero-caption .over { color: var(--danger); font-weight: 500; }
+
+    /* Last 7 days: one column per day, dashed line = daily limit */
+    .week { margin-top: 18px; padding: var(--s3) var(--s2) var(--s2); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-xl); }
+    .week-head { display: flex; justify-content: space-between; align-items: baseline; padding: 0 var(--s2) var(--s2); font-size: var(--text-secondary); color: var(--ink-2); }
+    .week-head .num { font-weight: 500; color: var(--ink); }
+    .week-bars { position: relative; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
+    .week-limit { position: absolute; left: var(--s1); right: var(--s1); border-top: 1.5px dashed var(--line-strong); pointer-events: none; }
+    .wday {
+      display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: var(--s1);
+      height: 156px; padding: var(--s1) 0; border: 0; border-radius: var(--r-md); background: transparent; color: var(--ink-3);
+    }
+    @media (hover: hover) { .wday:hover { background: var(--accent-soft); } }
+    .wday .amt { font-size: var(--text-meta); line-height: 1.4; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .wday .col {
+      display: block; width: 62%; max-width: 30px; min-height: 4px; border-radius: 6px; background: #CDBFAC;
+    }
+    .wday.over .col { background: #D9A596; }
+    .wday .dname { font-size: var(--text-meta); line-height: 1.4; font-weight: 500; }
+    .wday[aria-pressed="true"] .col { background: var(--accent); box-shadow: none; }
+    .wday[aria-pressed="true"].over .col { background: var(--danger); }
+    .wday[aria-pressed="true"] .dname, .wday[aria-pressed="true"] .amt { color: var(--ink); font-weight: 600; }
+
+    .period-links { display: flex; gap: var(--s2); margin-top: var(--s3); }
+
+    /* ---------- Lists: every entry is its own card ---------- */
+    .sec-head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s3); margin: var(--s5) var(--s1) var(--s2); }
+    .sec-head h2 { font-size: var(--text-body); font-weight: 600; line-height: 1.35; }
+    .sec-head span { font-size: var(--text-secondary); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+    .cards { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s2); }
+    .cards > li.card-item { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; }
+    .cards > li.card-item.review { background: var(--warn-bg); border-color: var(--warn-line); }
+    .cards > li.group { padding: var(--s3) var(--s1) 0; font-size: var(--text-meta); line-height: 1.4; font-weight: 500; color: var(--ink-3); }
+    .cards > li.group:first-child { padding-top: 0; }
+    .cards > li.group.danger { color: var(--danger); }
+
+    .row {
+      display: flex; align-items: center; gap: var(--s3); width: 100%; min-height: 60px;
+      padding: var(--s3) var(--s4); border: 0; background: transparent; text-align: left;
+    }
+    @media (hover: hover) { .row:hover { background: var(--accent-soft); } }
+    .row:focus-visible { outline-offset: -2px; border-radius: 0; }
+    .row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+    .row-title { font-size: var(--text-body); font-weight: 500; line-height: 1.35; overflow-wrap: anywhere; }
+    .row-sub { font-size: var(--text-secondary); color: var(--ink-2); line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .row-meta { font-size: var(--text-meta); line-height: 1.4; color: var(--ink-3); }
+    .row-meta .due-over { color: var(--danger); font-weight: 500; }
+    .row-meta .due-today { color: var(--accent); font-weight: 500; }
+    .row-end { flex: none; text-align: right; display: flex; flex-direction: column; align-items: flex-end; }
+    .row-amount { font-weight: 600; font-variant-numeric: tabular-nums; }
+    .row-orig { font-size: var(--text-meta); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+    .row.done .row-title { color: var(--ink-3); text-decoration: line-through; text-decoration-color: var(--line-strong); }
+
+    /* Kind tiles */
+    .kind { display: grid; place-items: center; width: 36px; height: 36px; flex: none; border-radius: 10px; }
+    .kind svg.i { width: 18px; height: 18px; }
+    .k-money { background: var(--t-money-bg); color: var(--t-money); }
+    .k-task { background: var(--t-task-bg); color: var(--t-task); }
+    .k-note { background: var(--t-note-bg); color: var(--t-note); }
+    .k-word { background: var(--t-word-bg); color: var(--t-word); }
+    .k-warn { background: var(--warn-tile); color: var(--warn-icon); }
+
+    /* Task check (tile in the day feed, circle in the task list) */
+    .task-row { display: flex; align-items: stretch; }
+    .task-row .row { padding-left: 0; }
+    .check { flex: none; display: grid; place-items: center; width: 60px; min-height: 60px; padding: 0 0 0 var(--s2); border: 0; background: transparent; }
+    .check .ring {
+      display: grid; place-items: center; width: 22px; height: 22px;
+      border: 1.75px solid var(--line-strong); border-radius: 50%; color: transparent;
+    }
+    .check.high .ring { border-color: var(--danger); }
+    .check[aria-pressed="true"] .ring { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+    .check.tile { width: auto; padding: 0 0 0 var(--s4); }
+    .task-row .check.tile + .row { padding-left: var(--s3); }
+    .check[aria-pressed="true"] .kind { background: var(--accent); color: var(--accent-ink); }
+    .check svg.tick { width: 14px; height: 14px; stroke-width: 2.5; opacity: 0; transform: scale(0.6); transition: opacity var(--motion-150) var(--ease-out), transform var(--motion-150) var(--ease-out); }
+    .check[aria-pressed="true"] svg.tick { opacity: 1; transform: none; }
+    .check .kind svg.tick { width: 18px; height: 18px; }
+    .check .kind svg.box { display: block; }
+    .check[aria-pressed="true"] .kind svg.box { display: none; }
+    .check:not([aria-pressed="true"]) .kind svg.tick { display: none; }
+    .prio { color: var(--danger); font-weight: 500; }
+
+    /* Review entries inline */
+    .review-entry { display: flex; gap: var(--s3); padding: var(--s3) var(--s4); }
+    .review-entry .row-main { gap: var(--s1); }
+    .review-entry .head { display: flex; justify-content: space-between; gap: var(--s2); }
+    .review-entry .note { font-size: var(--text-secondary); color: var(--warn-ink); }
+    .review-actions { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: var(--s1); }
+    .review-actions .confirm-text { flex-basis: 100%; font-size: var(--text-secondary); font-weight: 500; }
+
+    .masked { letter-spacing: 0.15em; color: var(--ink-3); }
+
+    /* ---------- States ---------- */
+    .state { padding: var(--s6) var(--s5); text-align: center; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); }
+    .state h2 { font-size: var(--text-body); font-weight: 600; line-height: 1.35; }
+    .state p { margin: var(--s1) auto 0; max-width: 34ch; font-size: var(--text-secondary); color: var(--ink-2); }
+    .state .actions { display: flex; justify-content: center; flex-wrap: wrap; gap: var(--s2); margin-top: var(--s4); }
+    .skeleton { padding: var(--s4); display: grid; gap: 18px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); }
+    .skeleton div { height: 14px; border-radius: 7px; background: var(--sunk); }
+    .skeleton div:nth-child(2n) { width: 62%; }
+    .gate { min-height: 70vh; display: grid; place-items: center; }
+
+    /* ---------- Flashcard ---------- */
+    .card {
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--s2);
+      width: 100%; min-height: 240px; padding: var(--s6) var(--s5);
+      background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-xl); text-align: center;
+    }
+    .card-word { font-size: 2rem; font-weight: 600; line-height: 1.15; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+    .card-phon { font-size: var(--text-secondary); color: var(--ink-2); }
+    .card-back { margin-top: var(--s4); padding-top: var(--s4); border-top: 1px solid var(--line); width: 100%; }
+    .card-trans { font-size: var(--text-h3); font-weight: 500; line-height: 1.3; }
+    .card-ex { margin-top: var(--s2); font-size: var(--text-secondary); color: var(--ink-2); }
+    .card-nav { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); margin-top: var(--s3); }
+    .card-count { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+    /* ---------- Top-1000: groups and tests ---------- */
+    .top-head { margin: var(--s2) 0 var(--s3); }
+    .top-head p { color: var(--ink-2); font-size: var(--text-secondary); }
+    .top-bar { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin-top: var(--s2); }
+    .top-bar > span { display: block; height: 100%; background: var(--accent); }
+    .sub-line { display: flex; justify-content: space-between; gap: var(--s3); }
+    .sub-line .until { color: var(--accent); }
+    .sub-card .top-bar { margin-bottom: var(--s3); }
+    .sub-card .btn { width: 100%; margin-top: var(--s2); }
+    .top-stack { display: grid; gap: var(--s3); }
+    .kind.k-num { font-weight: 600; font-variant-numeric: tabular-nums; }
+    .quiz-opts { display: grid; gap: var(--s2); margin-top: var(--s3); }
+    .quiz-opts .btn { width: 100%; justify-content: flex-start; text-align: left; height: auto; min-height: 48px; padding-top: 10px; padding-bottom: 10px; }
+    .quiz-opts .btn.is-right { border-color: #2F7D4F; background: rgba(47, 125, 79, .16); }
+    .quiz-opts .btn.is-wrong { border-color: var(--danger); background: rgba(143, 31, 46, .14); }
+    .top-score { font-size: 3rem; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; }
+
+    /* ---------- Dock ---------- */
+    .dock { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; background: var(--surface); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); }
+    .dock-inner { max-width: var(--page-max); margin-inline: auto; }
+    .capture { display: flex; align-items: flex-end; gap: var(--s2); padding: 10px 14px 0; }
+    .capture-field { flex: 1; display: flex; align-items: center; min-height: 48px; background: var(--bg); border: 1px solid transparent; border-radius: 24px; }
+    .capture-field:focus-within { border-color: var(--accent); }
+    .capture textarea {
+      flex: 1; resize: none; border: 0; background: transparent; max-height: 120px; height: 48px;
+      padding: 12px var(--s4); font-size: var(--text-body); line-height: 1.5; overflow-y: hidden; scrollbar-width: none;
+    }
+    .capture textarea.scroll { overflow-y: auto; }
+    .capture textarea:focus-visible { outline: none; }
+    .capture textarea::placeholder { color: var(--ink-3); }
+    .capture .icon-btn { width: 48px; height: 48px; border-radius: 24px; }
+    .capture .rec { background: var(--danger); color: #FFF; }
+    .rec-time { flex: 1; padding: 0 var(--s4); color: var(--danger); font-variant-numeric: tabular-nums; }
+    .tabs { display: flex; padding: var(--s1) var(--s2) 2px; }
+    .tabs button {
+      flex: 1; min-height: 48px; border: 0; background: transparent; border-radius: var(--r-md);
+      color: var(--ink-3); font-size: var(--text-secondary); font-weight: 500;
+    }
+    .tabs button[aria-current="page"] { color: var(--accent); font-weight: 600; }
+
+    /* ---------- Sheet ---------- */
+    dialog.sheet {
+      position: fixed; inset: auto 0 0 0; margin: 0 auto; padding: 0;
+      width: 100%; max-width: var(--page-max); max-height: 92vh; max-height: 92dvh;
+      border: 1px solid var(--line); border-bottom: 0; border-radius: var(--r-xl) var(--r-xl) 0 0;
+      background: var(--surface); color: var(--ink); box-shadow: var(--shadow-sheet); overflow: hidden;
+    }
+    dialog.sheet[open] { display: flex; flex-direction: column; animation: sheet-in var(--motion-300) var(--ease-out); }
+    dialog.sheet.closing { animation: sheet-out var(--motion-150) var(--ease-in) forwards; }
+    dialog.sheet::backdrop { background: var(--scrim); animation: fade-in var(--motion-200) var(--ease-out); }
+    @keyframes sheet-in { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+    @keyframes sheet-out { to { transform: translateY(24px); opacity: 0; } }
+    @keyframes fade-in { from { opacity: 0; } }
+    .sheet-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); padding: var(--s3) var(--s2) var(--s2) var(--s5); }
+    .sheet-head h2 { font-size: var(--text-h3); font-weight: 600; line-height: 1.25; }
+    .sheet-body { overflow-y: auto; padding: var(--s2) var(--s5) var(--s4); }
+    .sheet-foot { display: flex; align-items: center; gap: var(--s2); padding: var(--s3) var(--s5) calc(var(--s3) + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
+    .sheet-foot .spacer { flex: 1; }
+    .confirm-text { flex: 1 1 100%; font-size: var(--text-secondary); font-weight: 500; }
+    .sheet-foot.confirming { flex-wrap: wrap; background: var(--danger-soft); }
+
+    .period-total { font-family: var(--font-display); font-size: 2.75rem; font-weight: 400; line-height: 1.1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+    .cat-list { list-style: none; margin: var(--s4) 0; padding: 0; display: grid; gap: var(--s3); }
+    .cat-list li { display: grid; grid-template-columns: 1fr auto; gap: 2px var(--s3); font-size: var(--text-secondary); }
+    .cat-list .bar-track { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: var(--sunk); overflow: hidden; }
+    .cat-list .bar-fill { height: 100%; width: 100%; background: var(--accent); transform-origin: left center; }
+
+    /* Form fields */
+    .field { margin-bottom: var(--s4); }
+    .field > label, .field > .label { display: block; margin-bottom: 6px; font-size: var(--text-secondary); font-weight: 500; color: var(--ink-2); }
+    .field input, .field select, .field textarea {
+      width: 100%; min-height: var(--hit); padding: 10px var(--s3);
+      border: 1px solid var(--line-strong); border-radius: var(--r-md); background: var(--field); font-size: var(--text-body); line-height: 1.4;
+    }
+    .field textarea { resize: vertical; min-height: 132px; }
+    .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--accent); }
+    .field input.amount { font-weight: 600; font-size: 2rem; min-height: 56px; font-variant-numeric: tabular-nums; }
+    .field .hint, .settings-group > .hint { margin-top: 6px; font-size: var(--text-meta); line-height: 1.4; color: var(--ink-3); }
+    .field .error { margin-top: 6px; font-size: var(--text-secondary); color: var(--danger); }
+    .field [aria-invalid="true"] { border-color: var(--danger); }
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); }
+    .row2 .field { min-width: 0; }
+    .radio-chips { display: flex; flex-wrap: wrap; gap: var(--s2); }
+    .radio-chips label { position: relative; }
+    .radio-chips input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+    .radio-chips span { display: inline-flex; align-items: center; min-height: 40px; padding: 0 14px; border: 1px solid var(--line-strong); border-radius: 20px; font-size: var(--text-secondary); font-weight: 500; color: var(--ink-2); }
+    .radio-chips input:checked + span { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+    .radio-chips input:focus-visible + span { outline: 2px solid var(--focus); outline-offset: 2px; }
+    .quote { margin: 0 0 var(--s4); padding: var(--s3) var(--s4); border-radius: var(--r-md); background: var(--bg); font-size: var(--text-secondary); color: var(--ink-2); }
+    .quote .label { display: block; font-size: var(--text-meta); line-height: 1.4; color: var(--ink-3); margin-bottom: 2px; }
+    .secret { display: flex; align-items: flex-start; gap: var(--s2); }
+    .secret .value { flex: 1; min-width: 0; padding: var(--s3); border-radius: var(--r-md); background: var(--bg); overflow-wrap: anywhere; }
+
+    /* Toast */
+    .toast {
+      position: fixed; left: 50%; bottom: calc(var(--dock-h) + env(safe-area-inset-bottom) + var(--s3)); z-index: 60;
+      display: flex; align-items: center; gap: var(--s3); width: max-content; max-width: calc(100% - 32px);
+      padding: 10px 10px 10px var(--s4); background: var(--ink); color: var(--bg); border-radius: var(--r-md);
+      font-size: var(--text-secondary); line-height: 1.4;
+      opacity: 0; transform: translate(-50%, 8px); pointer-events: none;
+      transition: opacity var(--motion-200) var(--ease-out), transform var(--motion-200) var(--ease-out);
+    }
+    .toast.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+    .toast .msg { padding: 4px 0; }
+    .toast button { min-height: 36px; padding: 0 10px; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--bg); font-weight: 600; text-decoration: underline; }
+
+    /* ---------- Brand ---------- */
+    .brand-row { display: flex; align-items: center; justify-content: space-between; margin-right: calc(-1 * var(--s2)); }
+    .brand { display: flex; align-items: center; gap: var(--s2); min-height: var(--hit); }
+    /* Limit caption doubles as the way into settings */
+    .caption-btn { padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+    .caption-btn.off { color: var(--ink-3); }
+    .settings-group + .settings-group { margin-top: var(--s5); padding-top: var(--s4); border-top: 1px solid var(--line); }
+    .settings-group h3 { margin-bottom: var(--s3); font-size: var(--text-body); font-weight: 600; }
+    .switch-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); min-height: var(--hit); margin-bottom: var(--s3); font-size: var(--text-body); }
+    .switch-row input { appearance: none; -webkit-appearance: none; flex: none; position: relative; width: 48px; height: 28px; margin: 0; border-radius: 14px; background: var(--line-strong); transition: background var(--motion-150) var(--ease-out); }
+    .switch-row input::after { content: ''; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #FFF; box-shadow: 0 1px 2px rgba(0,0,0,0.2); transition: transform var(--motion-150) var(--ease-out); }
+    .switch-row input:checked { background: var(--accent); }
+    .switch-row input:checked::after { transform: translateX(20px); }
+    .switch-row input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+    .brand svg { width: 28px; height: 28px; flex: none; }
+
+    .splash {
+      position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; align-content: center; gap: var(--s3);
+      background: var(--bg); transition: opacity var(--motion-300) var(--ease-out);
+    }
+    .splash.out { opacity: 0; pointer-events: none; }
+    .splash svg { width: 72px; height: 72px; }
+    .splash .word { font-family: var(--font-display); font-style: italic; font-size: 2.5rem; line-height: 1; }
+    .splash .trace { stroke-dasharray: 60; stroke-dashoffset: 60; animation: draw 600ms var(--ease-out) 100ms forwards; }
+    .splash .dot { opacity: 0; animation: fade-in-dot 200ms var(--ease-out) 600ms forwards; }
+    @keyframes draw { to { stroke-dashoffset: 0; } }
+    @keyframes fade-in-dot { to { opacity: 1; } }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; }
+    }
+    @media (min-width: 768px) { .page { padding-top: var(--s6); } }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-wallet" viewBox="0 0 24 24"><path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-3"/><path d="M3 7h16a2 2 0 0 1 2 2v3h-5a2 2 0 0 0 0 4h5"/></symbol>
+    <symbol id="i-check-square" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="m8 12 3 3 5-6"/></symbol>
+    <symbol id="i-note" viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 19.5V5a2 2 0 0 1 2-2h14v15H6.5A2.5 2.5 0 0 0 4 20.5 2.5 2.5 0 0 0 6.5 23H20v-5"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.5"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v4"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+    <symbol id="i-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+    <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+    <symbol id="i-tick" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+  </svg>
+
+  <div class="splash" id="splash" aria-hidden="true">
+    <svg viewBox="0 0 32 32" fill="none"><circle cx="16" cy="16" r="16" fill="#221A14"/><path class="trace" d="M8 22c3-1 4-9 8-9s2 7 6 7" stroke="#F4EFE6" stroke-width="2" stroke-linecap="round"/><circle class="dot" cx="23" cy="11" r="2.4" fill="#D9482B"/></svg>
+    <span class="word">Trace</span>
+  </div>
+
+  <!-- ===== День ===== -->
+  <main class="page" id="view-day" data-view="day">
+    <div class="brand-row">
+      <div class="brand" role="img" aria-label="Trace">
+        <svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><circle cx="16" cy="16" r="16" fill="#221A14"/><path d="M8 22c3-1 4-9 8-9s2 7 6 7" stroke="#F4EFE6" stroke-width="2" stroke-linecap="round"/><circle cx="23" cy="11" r="2.4" fill="#D9482B"/></svg>
+      </div>
+      <button type="button" class="icon-btn" data-action="settings" title="Настройки" aria-label="Настройки"><svg class="i"><use href="#i-settings"/></svg></button>
+    </div>
+    <button type="button" class="review-banner" data-action="open-review" hidden></button>
+    <div class="day-nav">
+      <div class="side">
+        <button type="button" class="icon-btn" data-action="day-prev" title="Предыдущий день" aria-label="Предыдущий день"><svg class="i"><use href="#i-left"/></svg></button>
+        <button type="button" class="icon-btn" data-action="day-next" id="dayNext" title="Следующий день" aria-label="Следующий день"><svg class="i"><use href="#i-right"/></svg></button>
+      </div>
+      <button type="button" class="date-btn" data-action="pick-date" id="dayLabel" title="Выбрать дату">Сегодня</button>
+      <input type="date" id="dayPicker" class="date-input-hidden" tabindex="-1" aria-hidden="true" data-change="date">
+      <div class="side end">
+        <label class="sr-only" for="currencySel">Валюта</label>
+        <select id="currencySel" class="select-quiet" data-change="currency">
+          <option value="VND">₫ VND</option>
+          <option value="USD">$ USD</option>
+          <option value="RUB">₽ RUB</option>
+          <option value="AED">AED</option>
+          <option value="KZT">₸ KZT</option>
+          <option value="UAH">₴ UAH</option>
+          <option value="EUR">€ EUR</option>
+        </select>
+      </div>
+    </div>
+
+    <section class="hero" aria-live="polite">
+      <h1 class="hero-label" id="dayHeroLabel">Сегодня потрачено</h1>
+      <p class="hero-amount" id="dayTotal">—</p>
+      <p class="hero-caption" id="dayCaption">&nbsp;</p>
+    </section>
+
+    <section class="week" aria-labelledby="weekTitle">
+      <div class="week-head"><span id="weekTitle">Последние 7 дней</span><span class="num" id="weekTotal"></span></div>
+      <div class="week-bars" id="weekBars" role="group" aria-label="Траты по дням, нажмите на день, чтобы открыть его"></div>
+    </section>
+
+    <div class="period-links">
+      <button type="button" class="btn small" data-action="period" data-value="week">Траты за 7 дней</button>
+      <button type="button" class="btn small" data-action="period" data-value="month">За 30 дней</button>
+    </div>
+
+    <div id="dayFrame"></div>
+  </main>
+
+  <!-- ===== Задачи ===== -->
+  <main class="page" id="view-tasks" data-view="tasks" hidden>
+    <button type="button" class="review-banner" data-action="open-review" hidden></button>
+    <header class="view-head">
+      <h1>Задачи</h1>
+      <div class="head-actions">
+        <button type="button" class="icon-btn solid" data-action="new-task" title="Добавить задачу" aria-label="Добавить задачу"><svg class="i"><use href="#i-plus"/></svg></button>
+      </div>
+    </header>
+    <div class="segmented" role="group" aria-label="Показать">
+      <button type="button" data-action="task-filter" data-value="active" aria-pressed="true">Активные</button>
+      <button type="button" data-action="task-filter" data-value="completed" aria-pressed="false">Выполненные</button>
+    </div>
+    <div id="taskFrame"></div>
+  </main>
+
+  <!-- ===== Заметки ===== -->
+  <main class="page" id="view-notes" data-view="notes" hidden>
+    <button type="button" class="review-banner" data-action="open-review" hidden></button>
+    <header class="view-head">
+      <h1>Заметки</h1>
+      <div class="head-actions">
+        <button type="button" class="icon-btn solid" data-action="new-note" title="Добавить заметку" aria-label="Добавить заметку"><svg class="i"><use href="#i-plus"/></svg></button>
+      </div>
+    </header>
+    <div class="search">
+      <svg class="i"><use href="#i-search"/></svg>
+      <input type="search" id="notesSearch" placeholder="Поиск по заметкам" aria-label="Поиск по заметкам" data-input="notes-search" autocomplete="off">
+    </div>
+    <div id="noteFrame"></div>
+  </main>
+
+  <!-- ===== Слова ===== -->
+  <main class="page" id="view-words" data-view="words" hidden>
+    <button type="button" class="review-banner" data-action="open-review" hidden></button>
+    <header class="view-head">
+      <h1>Слова</h1>
+      <div class="head-actions">
+        <button type="button" class="icon-btn solid" data-action="new-word" title="Добавить слово" aria-label="Добавить слово"><svg class="i"><use href="#i-plus"/></svg></button>
+      </div>
+    </header>
+    <div class="segmented" role="group" aria-label="Режим">
+      <button type="button" data-action="word-mode" data-value="top" aria-pressed="true">Топ-1000</button>
+      <button type="button" data-action="word-mode" data-value="cards" aria-pressed="false">Мои карточки</button>
+      <button type="button" data-action="word-mode" data-value="list" aria-pressed="false">Мои слова</button>
+    </div>
+    <div id="wordsBody"></div>
+  </main>
+
+  <!-- ===== Нет доступа ===== -->
+  <main class="page gate" id="view-gate" hidden>
+    <div class="state">
+      <h2>Откройте TRACE из Telegram</h2>
+      <p>Данные видны только владельцу. Запустите приложение кнопкой в чате с ботом или откройте ссылку с вашим токеном.</p>
+    </div>
+  </main>
+
+  <!-- ===== Dock ===== -->
+  <div class="dock" id="dock">
+    <div class="dock-inner">
+      <form class="capture" id="captureForm" autocomplete="off">
+        <div class="capture-field">
+          <label class="sr-only" for="captureInput">Быстрая запись</label>
+          <textarea id="captureInput" rows="1" placeholder="Что сейчас было?" enterkeyhint="send"></textarea>
+          <span class="rec-time" id="recTime" hidden>0:00</span>
+        </div>
+        <button type="button" class="icon-btn solid" id="micBtn" data-action="mic" title="Записать голосом" aria-label="Записать голосом" hidden><svg class="i"><use href="#i-mic"/></svg></button>
+        <button type="submit" class="icon-btn solid" id="sendBtn" title="Отправить запись" aria-label="Отправить запись"><svg class="i"><use href="#i-send"/></svg></button>
+      </form>
+      <nav class="tabs" aria-label="Разделы">
+        <button type="button" data-action="tab" data-value="day" aria-current="page">День</button>
+        <button type="button" data-action="tab" data-value="tasks">Задачи</button>
+        <button type="button" data-action="tab" data-value="notes">Заметки</button>
+        <button type="button" data-action="tab" data-value="words">Слова</button>      </nav>
+    </div>
+  </div>
+
+  <dialog class="sheet" id="sheet" aria-labelledby="sheetTitle"></dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite">
+    <span class="msg" id="toastMsg"></span>
+    <button type="button" id="toastAction" hidden></button>
+  </div>
+
+  <script>
+    // ================= Auth-aware fetch =================
+    // Telegram-signed initData (Mini App) or a saved AUTH_TOKEN
+    // (open the page once as /app?token=... in a regular browser to store it).
+    (function () {
+      const nativeFetch = window.fetch.bind(window);
+      let token = '';
+      try {
+        const q = new URLSearchParams(location.search).get('token');
+        if (q) {
+          localStorage.setItem('trace_token', q);
+          history.replaceState(null, '', location.pathname);
+        }
+        token = localStorage.getItem('trace_token') || '';
+      } catch (e) {}
+      window.fetch = function (input, init) {
+        const target = typeof input === 'string' ? input : (input && input.url) || '';
+        if (target.startsWith('/api/')) {
+          init = Object.assign({}, init);
+          const headers = new Headers(init.headers || {});
+          const initData = window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData;
+          if (initData) headers.set('X-Telegram-Init-Data', initData);
+          if (token) headers.set('X-Token', token);
+          init.headers = headers;
+        }
+        return nativeFetch(input, init);
+      };
+    })();
+
+    // ================= Constants =================
+    const TZ = 'Asia/Ho_Chi_Minh';
+    let TZ_OFFSET_MS = 7 * 3600000; // replaced by the person's own zone once /api/settings answers (see loadProfile)
+    const DAY_MS = 86400000;
+
+    const CATEGORIES = { food: 'Еда', car: 'Транспорт', tech: 'IT и софт', services: 'Аренда и сервисы', other: 'Прочее' };
+    const KIND_NAMES = { finances: 'Расход', tasks: 'Задача', notes: 'Заметка' };
+
+    const S = {
+      view: 'day',
+      currency: 'VND',
+      date: null,             // YYYY-MM-DD of the day view; null = today
+      day: null,              // { finance, tasks, notes, words }
+      taskFilter: 'active',
+      tasks: [],
+      noteQuery: '',
+      notes: [],
+      words: [],
+      wordMode: 'top',
+      cardIdx: 0,
+      cardFlipped: false,
+      review: [],
+      revealed: new Set(),
+      idx: { finance: {}, task: {}, note: {}, word: {} }
+    };
+
+    const tg = window.Telegram && window.Telegram.WebApp;
+    const $ = (id) => document.getElementById(id);
+
+    // ================= Preferences =================
+    function loadPrefs() {
+      try {
+        const p = JSON.parse(localStorage.getItem('trace_prefs') || '{}');
+        if (p.currency) S.currency = p.currency;
+        if (p.view && ['day', 'tasks', 'notes', 'words'].includes(p.view)) S.view = p.view;
+        if (p.wordMode && p.wordsV === 2) S.wordMode = p.wordMode;   // older saves know only cards/list: start on the Top-1000
+      } catch (e) {}
+    }
+    function savePrefs() {
+      try { localStorage.setItem('trace_prefs', JSON.stringify({ currency: S.currency, view: S.view, wordMode: S.wordMode, wordsV: 2 })); } catch (e) {}
+    }
+
+    // ================= Theme / Telegram =================
+    // The app always uses the light "Ink" palette (cream paper, vermilion accent); Telegram's own chrome is painted to match
+    function applyTheme() {
+      const inTelegram = tg && tg.platform && tg.platform !== 'unknown';
+      document.documentElement.dataset.theme = 'light';
+      if (inTelegram) {
+        const css = getComputedStyle(document.documentElement);
+        try {
+          tg.setHeaderColor(css.getPropertyValue('--bg').trim());
+          tg.setBackgroundColor(css.getPropertyValue('--bg').trim());
+          if (tg.setBottomBarColor) tg.setBottomBarColor(css.getPropertyValue('--surface').trim());
+        } catch (e) {}
+      }
+    }
+    if (tg) {
+      tg.ready();
+      tg.expand();
+    }
+
+    function haptic(type) {
+      const h = tg && tg.HapticFeedback;
+      if (!h) return;
+      try {
+        if (type === 'success' || type === 'warning' || type === 'error') h.notificationOccurred(type);
+        else if (type === 'select') h.selectionChanged();
+        else h.impactOccurred(type || 'light');
+      } catch (e) {}
+    }
+
+    // ================= Helpers =================
+    function esc(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+    function group3(v, dec) {
+      const parts = Math.abs(v).toFixed(dec).split('.');
+      parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+      return (v < 0 ? '−' : '') + parts.join(',');
+    }
+    function money(amount, cur) {
+      const n = Number(amount || 0);
+      if (cur === 'VND') return group3(Math.round(n), 0) + ' ₫';
+      if (cur === 'RUB') return group3(Math.round(n), 0) + ' ₽';
+      if (cur === 'USD') return '$' + group3(n, n >= 1000 ? 0 : 2);
+      if (cur === 'KZT') return group3(Math.round(n), 0) + ' ₸';
+      if (cur === 'UAH') return group3(n, n >= 1000 ? 0 : 2) + ' ₴';
+      if (cur === 'EUR') return group3(n, n >= 1000 ? 0 : 2) + ' €';
+      return group3(n, 2) + ' ' + (cur || '');
+    }
+    function parseTs(v) {
+      if (!v) return null;
+      let s = String(v).trim();
+      if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?$/.test(s)) s = s.replace(' ', 'T') + 'Z';
+      const d = new Date(s);
+      return isNaN(d.getTime()) ? null : d;
+    }
+    function localKey(d) { return new Date(d.getTime() + TZ_OFFSET_MS).toISOString().slice(0, 10); }
+    function todayKey() { return localKey(new Date()); }
+    function shiftKey(key, days) { return new Date(Date.parse(key + 'T00:00:00Z') + days * DAY_MS).toISOString().slice(0, 10); }
+    function longDate(key, weekday) {
+      const opts = { timeZone: 'UTC', day: 'numeric', month: 'long' };
+      if (weekday) opts.weekday = 'long';
+      if (key.slice(0, 4) !== todayKey().slice(0, 4)) opts.year = 'numeric';
+      const s = new Date(key + 'T00:00:00Z').toLocaleDateString('ru-RU', opts);
+      return s.charAt(0).toUpperCase() + s.slice(1);
+    }
+    function dayName(key, withWeekday) {
+      const t = todayKey();
+      if (key === t) return 'Сегодня';
+      if (key === shiftKey(t, -1)) return 'Вчера';
+      if (key === shiftKey(t, 1)) return 'Завтра';
+      const opts = { timeZone: 'UTC', day: 'numeric', month: 'long' };
+      if (withWeekday) opts.weekday = 'short';
+      if (key.slice(0, 4) !== t.slice(0, 4)) opts.year = 'numeric';
+      return new Date(key + 'T00:00:00Z').toLocaleDateString('ru-RU', opts);
+    }
+    function timeOf(d) { return d ? d.toLocaleTimeString('ru-RU', { timeZone: TZ, hour: '2-digit', minute: '2-digit' }) : ''; }
+    function plural(n, one, few, many) {
+      const m10 = n % 10, m100 = n % 100;
+      if (m10 === 1 && m100 !== 11) return one;
+      if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
+      return many;
+    }
+    function icon(id, cls) { return '<svg class="i' + (cls ? ' ' + cls : '') + '"><use href="#i-' + id + '"/></svg>'; }
+    function remember(kind, list) { (list || []).forEach(x => { S.idx[kind][x.id] = x; }); }
+
+    // ================= API =================
+    class AuthError extends Error {}
+    class SubscriptionError extends Error {}
+    let subNoticeAt = 0; // the subscription toast is already on screen, so a generic failure toast must not cover it
+    async function api(path, opts) {
+      opts = opts || {};
+      const init = { method: opts.method || 'GET' };
+      if (opts.body !== undefined) {
+        init.headers = { 'Content-Type': 'application/json' };
+        init.body = JSON.stringify(opts.body);
+      }
+      let res;
+      try { res = await fetch(path, init); }
+      catch (e) { throw new Error('network'); }
+      let data = {};
+      if (res.status === 403) {
+        // Not a bad token: the person has no access to create new records
+        try { data = await res.clone().json(); } catch (e) {}
+        if (data.code === 'subscription_required') {
+          subNoticeAt = Date.now();
+          haptic('error');
+          toast(data.error || 'Подписка закончилась', { label: 'Подписка', run: settingsSheet });
+          throw new SubscriptionError(data.error || 'subscription_required');
+        }
+      }
+      if (res.status === 401 || res.status === 403) {
+        showGate();
+        throw new AuthError('auth');
+      }
+      try { data = await res.json(); } catch (e) {}
+      if (!res.ok || data.ok === false) {
+        const err = new Error(data.error || ('HTTP ' + res.status));
+        err.detail = { path, status: res.status, error: data.error || null, at: new Date().toISOString() };
+        throw err;
+      }
+      return data;
+    }
+
+    // ================= Toast =================
+    let toastTimer = null;
+    function toast(msg, action) {
+      const btn = $('toastAction');
+      $('toastMsg').textContent = msg;
+      if (action) {
+        btn.textContent = action.label;
+        btn.hidden = false;
+        btn.onclick = () => { hideToast(); action.run(); };
+      } else {
+        btn.hidden = true;
+        btn.onclick = null;
+      }
+      $('toast').classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(hideToast, action ? 6000 : 3000);
+    }
+    function hideToast() { $('toast').classList.remove('show'); }
+    function failToast(what, retry) {
+      if (Date.now() - subNoticeAt < 2000) return;
+      haptic('error');
+      toast('Не удалось ' + what + '. Проверьте соединение и попробуйте снова.', retry ? { label: 'Повторить', run: retry } : null);
+    }
+
+    // ================= Frame states =================
+    const skeletonTimers = {};
+    function startLoading(frameId) {
+      clearTimeout(skeletonTimers[frameId]);
+      const frame = $(frameId);
+      // No loader for fast responses; the skeleton only appears if loading takes over 300ms
+      skeletonTimers[frameId] = setTimeout(() => {
+        if (!frame) return;
+        frame.setAttribute('aria-busy', 'true');
+        if (!frame.innerHTML.trim()) frame.innerHTML = '<div class="skeleton" aria-hidden="true"><div></div><div></div><div></div><div></div></div>';
+      }, 300);
+    }
+    function stopLoading(frameId) {
+      clearTimeout(skeletonTimers[frameId]);
+      const frame = $(frameId);
+      if (frame) frame.removeAttribute('aria-busy');
+    }
+    function stateHtml(title, text, actions) {
+      return '<div class="state"><h2>' + esc(title) + '</h2>' + (text ? '<p>' + esc(text) + '</p>' : '') +
+        (actions ? '<div class="actions">' + actions + '</div>' : '') + '</div>';
+    }
+    function errorState(frameId, what, retryAction) {
+      stopLoading(frameId);
+      $(frameId).innerHTML = stateHtml('Не удалось загрузить ' + what,
+        'Проверьте соединение и попробуйте снова. Сохранённые данные не пострадали.',
+        '<button type="button" class="btn primary" data-action="' + retryAction + '">Повторить загрузку</button>');
+    }
+    function showGate() {
+      document.querySelectorAll('main.page').forEach(m => { m.hidden = m.id !== 'view-gate'; });
+      $('dock').hidden = true;
+    }
+
+    // ================= Navigation =================
+    function setView(view) {
+      S.view = view;
+      savePrefs();
+      document.querySelectorAll('main[data-view]').forEach(m => { m.hidden = m.dataset.view !== view; });
+      document.querySelectorAll('.tabs button').forEach(b => {
+        if (b.dataset.value === view) b.setAttribute('aria-current', 'page');
+        else b.removeAttribute('aria-current');
+      });
+      window.scrollTo(0, 0);
+      syncCapturePlaceholder();
+      loadView();
+      renderReviewBanner();
+    }
+    function loadView() {
+      if (S.view === 'day') loadDay();
+      else if (S.view === 'tasks') loadTasks();
+      else if (S.view === 'notes') loadNotes();
+      else if (S.view === 'words') loadWords();    }
+    function refresh() { loadView(); loadReview(); }
+
+    // A record named in the start URL: found among the day's lists or, if it is still unchecked, in the review queue
+    function tryPendingOpen() {
+      const p = S.pendingOpen;
+      if (!p || !S.day) return;
+      const table = { finance: 'finances', task: 'tasks', note: 'notes' }[p.kind];
+      const item = (S.idx[p.kind] && S.idx[p.kind][p.id]) ||
+        (S.review || []).find(i => i.entity_type === table && String(i.id) === p.id);
+      if (!item) return;
+      S.pendingOpen = null;
+      OPENERS[p.kind](item);
+    }
+    function setPressed(selector, value) {
+      document.querySelectorAll(selector).forEach(b => b.setAttribute('aria-pressed', String(b.dataset.value === value)));
+    }
+
+    // ================= Day =================
+    function dayKey() { return S.date || todayKey(); }
+
+    // A past day open on the Day tab: what is captured there is filed under that day
+    function captureDay() { return S.view === 'day' && S.date && S.date < todayKey() ? S.date : null; }
+    function syncCapturePlaceholder() {
+      const d = captureDay();
+      const name = d ? dayName(d) : '';
+      captureInput.placeholder = d ? 'Что было ' + (name === 'Вчера' ? 'вчера' : name) + '?' : 'Что сейчас было?';
+    }
+
+    let dayReq = 0;
+    async function loadDay() {
+      const key = dayKey();
+      const req = ++dayReq;
+      const isToday = key === todayKey();
+      $('dayLabel').textContent = longDate(key, true);
+      $('dayNext').style.visibility = isToday ? 'hidden' : 'visible';
+      syncCapturePlaceholder();
+      $('dayHeroLabel').textContent = isToday ? 'Сегодня потрачено' : key === shiftKey(todayKey(), -1) ? 'Вчера потрачено' : 'Потрачено ' + dayName(key);
+
+      startLoading('dayFrame');
+      const finUrl = '/api/finances?currency=' + S.currency + (isToday ? '&period=day' : '&date=' + key);
+      try {
+        const [finance, week, tasks, notes, words] = await Promise.all([
+          api(finUrl),
+          api('/api/finances?period=week&currency=' + S.currency),
+          api('/api/tasks?filter=all'),
+          api('/api/notes?q='),
+          api('/api/vocabulary')
+        ]);
+        if (req !== dayReq) return; // a newer load (other day, currency or a refresh) owns the screen
+        S.day = { finance, week, tasks: tasks.tasks || [], notes: notes.notes || [], words: words.words || words.vocabulary || [] };
+        remember('finance', finance.transactions);
+        remember('task', S.day.tasks);
+        remember('note', S.day.notes);
+        remember('word', S.day.words);
+        stopLoading('dayFrame');
+        renderDay();
+      } catch (e) {
+        if (e instanceof AuthError || req !== dayReq) return;
+        errorState('dayFrame', 'день', 'reload-day');
+      }
+    }
+
+    function dayReviewItems(key) {
+      return S.review.filter(i => { const t = parseTs(i.created_at); return t && localKey(t) === key; });
+    }
+
+    function renderDay() {
+      const d = S.day;
+      if (!d) return;
+      const key = dayKey();
+      const total = Number(d.finance.total || 0);
+      const limit = Number(d.finance.limit || 0);
+      $('dayTotal').textContent = money(total, S.currency);
+      if (limit > 0) {
+        $('dayCaption').innerHTML = '<button type="button" class="caption-btn" data-action="settings" aria-label="Дневной лимит, изменить">Лимит ' + esc(money(limit, S.currency)) + '</button>, ' + (total > limit
+          ? '<span class="over">сверх на ' + esc(money(total - limit, S.currency)) + '</span>'
+          : 'осталось ' + esc(money(limit - total, S.currency)));
+      } else {
+        $('dayCaption').innerHTML = '<button type="button" class="caption-btn off" data-action="settings">Дневной лимит выключен</button>';
+      }
+      renderWeek(key);
+      renderSections(key);
+      renderReviewBanner();
+      tryPendingOpen();
+    }
+
+    // Short amounts for the column labels: 45к, 3,5м, $17
+    function moneyShort(n, cur) {
+      n = Number(n || 0);
+      if (!n) return '0';
+      if (cur === 'VND' || cur === 'RUB') {
+        if (n >= 1e6) return (Math.round(n / 1e5) / 10).toString().replace('.', ',') + 'м';
+        if (n >= 1e3) return Math.round(n / 1e3) + 'к';
+        return String(Math.round(n));
+      }
+      return (cur === 'USD' ? '$' : '') + (n >= 1000 ? Math.round(n / 100) / 10 + 'к' : Math.round(n));
+    }
+
+    function renderWeek(selectedKey) {
+      const week = S.day.week || {};
+      const limit = Number(week.daily_limit || 0);
+      const today = todayKey();
+      const totals = {};
+      (week.transactions || []).forEach(t => {
+        if (t.outside_limit) return; // planned purchase: not in the day's total
+        const ts = parseTs(t.created_at);
+        if (ts) totals[localKey(ts)] = (totals[localKey(ts)] || 0) + Number(t.amount || 0);
+      });
+      const days = [];
+      for (let i = 6; i >= 0; i--) {
+        const k = shiftKey(today, -i);
+        days.push({ key: k, total: totals[k] || 0 });
+      }
+      // One very large day (rent) must not flatten the rest: the scale tops out at 3x the daily limit
+      const peak = Math.max(...days.map(d => d.total), limit, 1);
+      const scaleMax = limit > 0 ? Math.min(peak, limit * 3) : peak;
+      const H = 104; // column area height, px
+      const sum = days.reduce((s, d) => s + d.total, 0);
+      $('weekTotal').textContent = money(sum, S.currency);
+      let html = '';
+      if (limit > 0 && limit <= scaleMax) {
+        html += '<span class="week-limit" style="bottom:' + Math.round(26 + (limit / scaleMax) * H) + 'px" aria-hidden="true"></span>';
+      }
+      html += days.map((d, i) => {
+        const h = d.total > 0 ? Math.max(6, Math.round(Math.min(d.total, scaleMax) / scaleMax * H)) : 4;
+        const over = limit > 0 && d.total > limit;
+        const date = new Date(d.key + 'T00:00:00Z');
+        const dname = d.key === today ? 'Сег' : date.toLocaleDateString('ru-RU', { timeZone: 'UTC', weekday: 'short' });
+        const label = longDate(d.key, true) + ': ' + money(d.total, S.currency) + (over ? ', выше лимита' : '');
+        return '<button type="button" class="wday' + (over ? ' over' : '') + '" data-action="pick-day" data-value="' + d.key + '" aria-pressed="' + (d.key === selectedKey) + '" aria-label="' + esc(label) + '">' +
+          '<span class="amt">' + esc(moneyShort(d.total, S.currency)) + '</span>' +
+          '<span class="col" style="height:' + h + 'px"></span>' +
+          '<span class="dname">' + esc(dname) + '</span></button>';
+      }).join('');
+      $('weekBars').innerHTML = html;
+    }
+
+    function taskDue(t) {
+      if (!t.due_datetime) return null;
+      if (t.is_date_only) {
+        const key = String(t.due_datetime).slice(0, 10);
+        return { key, dateOnly: true, ts: Date.parse(key + 'T23:59:59Z') - TZ_OFFSET_MS };
+      }
+      const d = parseTs(t.due_datetime);
+      if (!d) return null;
+      return { key: localKey(d), dateOnly: false, ts: d.getTime(), time: timeOf(d) };
+    }
+
+    function buildFeed(key) {
+      const d = S.day;
+      const items = [];
+      (d.finance.transactions || []).forEach(t => {
+        const ts = parseTs(t.created_at);
+        if (ts) items.push({ kind: 'finance', ts: ts.getTime(), data: t });
+      });
+      d.notes.forEach(n => {
+        const ts = parseTs(n.created_at);
+        if (ts && localKey(ts) === key) items.push({ kind: 'note', ts: ts.getTime(), data: n });
+      });
+      d.words.forEach(w => {
+        const ts = parseTs(w.created_at);
+        if (ts && localKey(ts) === key) items.push({ kind: 'word', ts: ts.getTime(), data: w });
+      });
+      d.tasks.forEach(t => {
+        if (t.needs_review || t.possible_duplicate) return; // shown as a review entry instead
+        const due = taskDue(t);
+        const created = parseTs(t.created_at);
+        if (due && due.key === key && !t.is_completed) {
+          // planned for this day: sits at its due time; all-day tasks go on top
+          items.push({ kind: 'task', ts: due.dateOnly ? Infinity : due.ts, data: t, allDay: due.dateOnly });
+        } else if (created && localKey(created) === key) {
+          items.push({ kind: 'task', ts: created.getTime(), data: t });
+        }
+      });
+      dayReviewItems(key).forEach(r => {
+        const ts = parseTs(r.created_at);
+        items.push({ kind: 'review', ts: ts.getTime(), data: r });
+      });
+      return items.sort((a, b) => b.ts - a.ts);
+    }
+
+    // The day is split into separate blocks: what needs checking, spending, tasks, notes, words
+    function renderSections(key) {
+      const frame = $('dayFrame');
+      const items = buildFeed(key);
+      if (!items.length) {
+        frame.innerHTML = '<div style="margin-top:var(--s5)">' + stateHtml(key === todayKey() ? 'Сегодня пока пусто' : 'За этот день записей нет',
+          'Скажите или напишите внизу, что произошло: «кофе 45к», «позвонить Ахмеду в 10». Запись появится здесь.',
+          '<button type="button" class="btn primary" data-action="focus-capture">Написать запись</button>') + '</div>';
+        return;
+      }
+      const of = (kind) => items.filter(i => i.kind === kind);
+      const spend = of('finance').reduce((s, i) => s + Number(i.data.amount || 0), 0);
+      const blocks = [
+        { title: 'Проверить', list: of('review'), aside: '' },
+        { title: 'Траты', list: of('finance'), aside: money(spend, S.currency) },
+        { title: 'Задачи', list: of('task'), aside: '' },
+        { title: 'Заметки', list: of('note'), aside: '' },
+        { title: 'Новые слова', list: of('word'), aside: '' }
+      ];
+      frame.innerHTML = blocks.filter(b => b.list.length).map(b =>
+        '<section><div class="sec-head"><h2>' + b.title + '</h2><span>' + esc(b.aside || String(b.list.length)) + '</span></div>' +
+        '<ul class="cards">' + b.list.map(it => {
+          if (it.kind === 'review') return '<li class="card-item review">' + reviewEntryHtml(it.data) + '</li>';
+          if (it.kind === 'task') return taskFeedRow(it);
+          return '<li class="card-item">' + feedRow(it) + '</li>';
+        }).join('') + '</ul></section>'
+      ).join('');
+    }
+
+    function feedRow(it) {
+      const ts = new Date(it.ts);
+      if (it.kind === 'finance') {
+        const t = it.data;
+        const catName = CATEGORIES[t.category] || CATEGORIES.other;
+        const cat = /^[A-ZА-Я]{2}/.test(catName) ? catName : catName.toLowerCase(); // keep "IT" as is
+        const orig = t.original_currency && t.original_currency !== S.currency ? ', ' + money(t.original_amount, t.original_currency) : '';
+        return '<button type="button" class="row" data-action="open" data-kind="finance" data-id="' + t.id + '">' +
+          '<span class="kind k-money">' + icon('wallet') + '</span>' +
+          '<span class="row-main"><span class="row-title">' + esc(t.title || t.raw_text || 'Расход') + '</span>' +
+          '<span class="row-meta">' + esc(timeOf(ts) + ', ' + cat + orig + (t.is_debt ? ', долг' : t.outside_limit ? ', вне лимита' : '')) + '</span></span>' +
+          '<span class="row-end"><span class="row-amount">' + esc(money(t.amount, S.currency)) + '</span></span></button>';
+      }
+      if (it.kind === 'note') {
+        const n = it.data;
+        const secret = n.category === 'credentials';
+        return '<button type="button" class="row" data-action="open" data-kind="note" data-id="' + n.id + '">' +
+          '<span class="kind k-note">' + icon('note') + '</span>' +
+          '<span class="row-main"><span class="row-title">' + esc(n.title || 'Заметка') + '</span>' +
+          (secret ? '' : (n.content ? '<span class="row-sub">' + esc(n.content) + '</span>' : '')) +
+          '<span class="row-meta">' + esc(timeOf(ts)) + '</span></span></button>';
+      }
+      const w = it.data;
+      return '<button type="button" class="row" data-action="open" data-kind="word" data-id="' + w.id + '">' +
+        '<span class="kind k-word">' + icon('book') + '</span>' +
+        '<span class="row-main"><span class="row-title">' + esc(w.word) + '</span>' +
+        '<span class="row-meta">' + esc(timeOf(ts) + ', ' + (w.translation || 'слово')) + '</span></span></button>';
+    }
+
+    function taskFeedRow(it) {
+      const t = it.data;
+      const isDone = !!t.is_completed;
+      const due = taskDue(t);
+      let meta;
+      if (it.allDay) meta = 'Задача на весь день';
+      else if (due && due.key === dayKey()) meta = 'Задача на ' + due.time;
+      else if (due) meta = 'Задача на ' + dayName(due.key).toLowerCase() + (due.dateOnly ? '' : ', ' + due.time);
+      else meta = timeOf(new Date(it.ts)) + ', задача';
+      const overdue = due && !isDone && due.ts < Date.now();
+      return '<li class="card-item task-row">' +
+        '<button type="button" class="check tile" data-action="toggle-task" data-id="' + t.id + '" aria-pressed="' + isDone + '" aria-label="' + (isDone ? 'Вернуть в активные: ' : 'Отметить выполненной: ') + esc(t.title) + '">' +
+          '<span class="kind k-task">' + icon('check-square', 'box') + icon('tick', 'tick') + '</span></button>' +
+        '<button type="button" class="row' + (isDone ? ' done' : '') + '" data-action="open" data-kind="task" data-id="' + t.id + '">' +
+          '<span class="row-main"><span class="row-title">' + esc(t.title) + '</span>' +
+          '<span class="row-meta' + '">' + (t.priority === 'high' && !isDone ? '<span class="prio">Важно</span>, ' : '') +
+            '<span class="' + (overdue ? 'due-over' : '') + '">' + esc(meta) + '</span></span></span></button></li>';
+    }
+
+    async function periodSheet(period) {
+      openSheet({ title: period === 'week' ? 'Траты за 7 дней' : 'Траты за 30 дней', kind: 'period', body: '<div class="skeleton" aria-hidden="true"><div></div><div></div><div></div></div>', noFooter: true });
+      let data;
+      try {
+        data = await api('/api/finances?period=' + period + '&currency=' + S.currency);
+      } catch (e) {
+        if (e instanceof AuthError) return;
+        const b = $('sheet').querySelector('.sheet-body');
+        if (b) b.innerHTML = stateHtml('Не удалось загрузить траты', 'Проверьте соединение и попробуйте снова.',
+          '<button type="button" class="btn primary" data-action="period" data-value="' + period + '">Повторить загрузку</button>');
+        return;
+      }
+      remember('finance', data.transactions);
+      const body = $('sheet').querySelector('.sheet-body');
+      if (!body) return;
+      const total = Number(data.total || 0);
+      const limit = Number(data.limit || 0);
+      const cats = Object.keys(CATEGORIES).filter(k => Number(data.categories?.[k] || 0) > 0).sort((a, b) => data.categories[b] - data.categories[a]);
+      let html = '<p class="period-total">' + esc(money(total, S.currency)) + '</p>' +
+        (limit > 0 ? '<p class="hero-caption">Лимит на период ' + esc(money(limit, S.currency)) + ', ' + (total > limit
+          ? '<span class="over">сверх на ' + esc(money(total - limit, S.currency)) + '</span>'
+          : 'осталось ' + esc(money(limit - total, S.currency))) + '</p>' : '');
+      if (cats.length) {
+        html += '<ul class="cat-list">' + cats.map(k => {
+          const v = Number(data.categories[k]);
+          return '<li><span>' + esc(CATEGORIES[k]) + '</span><span class="num">' + esc(money(v, S.currency)) + '</span>' +
+            '<span class="bar-track"><span class="bar-fill" style="display:block;transform:scaleX(' + (v / (total || 1)).toFixed(3) + ')"></span></span></li>';
+        }).join('') + '</ul>';
+      }
+      const txs = data.transactions || [];
+      if (!txs.length) {
+        html += stateHtml('За этот период трат нет', 'Траты появятся здесь, как только вы их надиктуете.');
+      } else {
+        let last = '';
+        const rows = [];
+        txs.forEach(t => {
+          const ts = parseTs(t.created_at);
+          const k = ts ? localKey(ts) : '';
+          if (k !== last) {
+            const sum = txs.filter(x => { const s = parseTs(x.created_at); return s && localKey(s) === k && !x.outside_limit; }).reduce((s, x) => s + Number(x.amount || 0), 0);
+            rows.push('<li class="group">' + esc(dayName(k, true)) + ', ' + esc(money(sum, S.currency)) + '</li>');
+            last = k;
+          }
+          rows.push('<li class="card-item">' + feedRow({ kind: 'finance', ts: ts ? ts.getTime() : 0, data: t }) + '</li>');
+        });
+        html += '<ul class="cards">' + rows.join('') + '</ul>';
+      }
+      body.innerHTML = html;
+    }
+
+    function financeSheet(tx) {
+      const isNew = !tx;
+      tx = tx || { title: '', category: 'other' };
+      const amount = isNew ? '' : (tx.original_amount !== undefined ? tx.original_amount : tx.amount);
+      const cur = tx.original_currency || tx.currency || S.currency;
+      const cats = Object.keys(CATEGORIES).map(k =>
+        '<label><input type="radio" name="category" value="' + k + '"' + ((CATEGORIES[tx.category] ? tx.category : 'other') === k ? ' checked' : '') + '><span>' + esc(CATEGORIES[k]) + '</span></label>').join('');
+      const ts = parseTs(tx.created_at);
+      openSheet({
+        title: isNew ? 'Новый расход' : 'Расход',
+        entity: { kind: 'finance', id: tx.id, name: tx.title || 'без названия', noun: 'расход' },
+        body:
+          '<div class="row2" style="grid-template-columns: 2fr 1fr;">' +
+            '<div class="field"><label for="fAmount">Сумма</label>' +
+              '<input id="fAmount" name="amount" class="amount" type="text" inputmode="decimal" value="' + esc(amount) + '" data-validate="amount" required>' +
+              '<p class="error" id="fAmount-error" hidden>Введите сумму больше нуля, например 45000</p></div>' +
+            '<div class="field"><label for="fCur">Валюта</label><select id="fCur" name="currency">' +
+              ['VND', 'USD', 'RUB', 'AED'].map(c => '<option' + (c === cur ? ' selected' : '') + '>' + c + '</option>').join('') +
+            '</select></div>' +
+          '</div>' +
+          '<div class="field"><label for="fTitle">На что</label><input id="fTitle" name="title" type="text" value="' + esc(tx.title || '') + '" autocomplete="off"></div>' +
+          // The day the money was spent: moving it to another day keeps the recorded time
+          '<div class="field"><label for="fDate">Когда</label><input id="fDate" name="date" type="date" max="' + todayKey() + '" value="' + esc(ts ? localKey(ts) : (captureDay() || todayKey())) + '"></div>' +
+          '<div class="field"><span class="label" id="fCatLabel">Категория</span><div class="radio-chips" role="radiogroup" aria-labelledby="fCatLabel">' + cats + '</div></div>' +
+          '<label class="switch-row"><span>Вне лимита (плановая покупка)</span><input type="checkbox" role="switch" name="outside_limit"' + (tx.outside_limit && !tx.is_debt ? ' checked' : '') + '></label>' +
+          '<label class="switch-row"><span>Это долг</span><input type="checkbox" role="switch" name="is_debt"' + (tx.is_debt ? ' checked' : '') + '></label>' +
+          '<label class="switch-row"><span>Я должен (а не мне)</span><input type="checkbox" role="switch" name="debt_owe"' + (tx.is_debt && tx.debt_owe ? ' checked' : '') + '></label>' +
+          '<p class="hint">Название траты — имя человека, например «Арбуз». Долг не входит в итог дня и собирается в Настройках, в разделе «Долги».</p>' +
+          (tx.raw_transcript ? '<p class="quote"><span class="label">Как было сказано</span>«' + esc(tx.raw_transcript) + '»</p>' : '') +
+          (!isNew && ts ? '<p class="row-meta">Записано в ' + esc(timeOf(ts)) + '</p>' : '') +
+          (!isNew ? '<button type="button" class="btn" data-action="make-rec" data-id="' + tx.id + '">Повторять каждый месяц</button>' : ''),
+        primary: isNew ? 'Добавить расход' : 'Сохранить расход',
+        canDelete: !isNew,
+        onSave: async (f) => {
+          const amountVal = parseFloat(String(f.amount.value).replace(/\s/g, '').replace(',', '.'));
+          const body = { amount: amountVal, title: f.title.value.trim(), category: f.category.value, currency: f.currency.value, outside_limit: f.outside_limit.checked, is_debt: f.is_debt.checked, debt_owe: f.is_debt.checked && f.debt_owe.checked };
+          const day = f.date.value && f.date.value <= todayKey() ? f.date.value : null;
+          if (day && (isNew || day !== (ts ? localKey(ts) : null))) body.date = day;
+          if (isNew) await api('/api/finances', { method: 'POST', body });
+          else await api('/api/finances/' + tx.id, { method: 'PATCH', body });
+          toast(isNew ? 'Расход добавлен' : 'Расход сохранён');
+          refresh();
+        },
+        onDelete: async () => {
+          await api('/api/finances/' + tx.id, { method: 'DELETE' });
+          toast('Расход удалён');
+          refresh();
+        }
+      });
+    }
+
+    // ================= Tasks =================
+    let taskReq = 0;
+    async function loadTasks() {
+      const req = ++taskReq;
+      startLoading('taskFrame');
+      try {
+        const data = await api('/api/tasks?filter=' + S.taskFilter);
+        if (req !== taskReq) return;
+        S.tasks = data.tasks || [];
+        remember('task', S.tasks);
+        stopLoading('taskFrame');
+        renderTasks();
+      } catch (e) {
+        if (e instanceof AuthError) return;
+        errorState('taskFrame', 'задачи', 'reload-tasks');
+      }
+    }
+
+    function renderTasks() {
+      const frame = $('taskFrame');
+      const list = S.tasks || [];
+      if (!list.length) {
+        frame.innerHTML = S.taskFilter === 'active'
+          ? stateHtml('Активных задач нет', 'Напишите или скажите задачу внизу, например «завтра в 10 позвонить Ахмеду». Срок и напоминание поставятся сами.',
+              '<button type="button" class="btn primary" data-action="new-task">Добавить задачу</button>')
+          : stateHtml('Выполненных задач пока нет', 'Отмечайте задачи кружком слева, и они появятся здесь.',
+              '<button type="button" class="btn" data-action="task-filter" data-value="active">Показать активные</button>');
+        return;
+      }
+      const now = Date.now();
+      const today = todayKey();
+      const buckets = [
+        { id: 'over', title: 'Просрочено', items: [], cls: 'danger' },
+        { id: 'today', title: 'Сегодня', items: [] },
+        { id: 'tomorrow', title: 'Завтра', items: [] },
+        { id: 'later', title: 'Позже', items: [] },
+        { id: 'none', title: 'Без срока', items: [] }
+      ];
+      const done = S.taskFilter !== 'active';
+      list.forEach(t => {
+        if (done) { buckets[4].items.push(t); return; }
+        const due = taskDue(t);
+        if (!due) buckets[4].items.push(t);
+        else if (due.ts < now && due.key <= today) buckets[0].items.push(t);
+        else if (due.key === today) buckets[1].items.push(t);
+        else if (due.key === shiftKey(today, 1)) buckets[2].items.push(t);
+        else buckets[3].items.push(t);
+      });
+      buckets.slice(0, 4).forEach(b => b.items.sort((a, c) => (taskDue(a)?.ts || 0) - (taskDue(c)?.ts || 0)));
+      const html = [];
+      const showHeaders = !done && buckets.filter(b => b.items.length).length > 1;
+      buckets.forEach(b => {
+        if (!b.items.length) return;
+        if (showHeaders) html.push('<li class="group' + (b.cls ? ' ' + b.cls : '') + '">' + b.title + '</li>');
+        b.items.forEach(t => html.push(taskRow(t, b.id)));
+      });
+      frame.innerHTML = '<ul class="cards">' + html.join('') + '</ul>';
+    }
+
+    function taskRow(t, bucket) {
+      const isDone = !!t.is_completed;
+      const due = taskDue(t);
+      let dueHtml = '';
+      if (due) {
+        const txt = (bucket === 'today' || bucket === 'tomorrow')
+          ? (due.dateOnly ? '' : due.time)
+          : dayName(due.key) + (due.dateOnly ? '' : ', ' + due.time);
+        if (txt) dueHtml = '<span class="num' + (bucket === 'over' ? ' due-over' : bucket === 'today' ? ' due-today' : '') + '">' + esc(txt) + '</span>';
+      }
+      const parts = [];
+      if (t.priority === 'high') parts.push('<span class="prio">Важно</span>');
+      if (dueHtml) parts.push(dueHtml);
+      return '<li class="card-item task-row">' +
+        '<button type="button" class="check' + (t.priority === 'high' && !isDone ? ' high' : '') + '" data-action="toggle-task" data-id="' + t.id + '" aria-pressed="' + isDone + '" aria-label="' + (isDone ? 'Вернуть в активные: ' : 'Отметить выполненной: ') + esc(t.title) + '"><span class="ring">' + icon('tick', 'tick') + '</span></button>' +
+        '<button type="button" class="row' + (isDone ? ' done' : '') + '" data-action="open" data-kind="task" data-id="' + t.id + '">' +
+          '<span class="row-main"><span class="row-title">' + esc(t.title) + '</span>' +
+          (parts.length ? '<span class="row-meta">' + parts.join(', ') + '</span>' : '') + '</span>' +
+        '</button></li>';
+    }
+
+    async function toggleTask(id, btn) {
+      const t = S.idx.task[id];
+      if (!t) return;
+      haptic(t.is_completed ? 'light' : 'success');
+      t.is_completed = t.is_completed ? 0 : 1;
+      btn.setAttribute('aria-pressed', String(!!t.is_completed));
+      const row = btn.nextElementSibling;
+      if (row) row.classList.toggle('done', !!t.is_completed);
+      try {
+        await api('/api/tasks/' + id + '/toggle', { method: 'POST' });
+        toast(t.is_completed ? 'Задача выполнена' : 'Задача снова активна', {
+          label: 'Отменить',
+          run: async () => {
+            try { await api('/api/tasks/' + id + '/toggle', { method: 'POST' }); loadView(); }
+            catch (e) { if (!(e instanceof AuthError)) failToast('отменить действие'); }
+          }
+        });
+        if (S.view === 'tasks') setTimeout(loadTasks, 700);
+      } catch (e) {
+        if (e instanceof AuthError) return;
+        t.is_completed = t.is_completed ? 0 : 1;
+        btn.setAttribute('aria-pressed', String(!!t.is_completed));
+        if (row) row.classList.toggle('done', !!t.is_completed);
+        failToast('обновить задачу', () => toggleTask(id, btn));
+      }
+    }
+
+    function taskSheet(t) {
+      const isNew = !t;
+      t = t || { title: '', priority: 'medium' };
+      const due = taskDue(t);
+      openSheet({
+        title: isNew ? 'Новая задача' : 'Задача',
+        entity: { kind: 'task', id: t.id, name: t.title, noun: 'задачу' },
+        body:
+          '<div class="field"><label for="tTitle">Что сделать</label>' +
+            '<input id="tTitle" name="title" type="text" value="' + esc(t.title) + '" data-validate="required" required autocomplete="off">' +
+            '<p class="error" id="tTitle-error" hidden>Опишите задачу, например «Позвонить Ахмеду»</p></div>' +
+          '<div class="row2">' +
+            '<div class="field"><label for="tDate">Срок</label><input id="tDate" name="date" type="date" value="' + esc(due ? due.key : '') + '"></div>' +
+            '<div class="field"><label for="tTime">Время</label><input id="tTime" name="time" type="time" value="' + esc(due && !due.dateOnly ? due.time : '') + '"></div>' +
+          '</div>' +
+          '<p class="row-meta" style="margin:-8px 0 16px">Со временем бот пришлёт напоминание в Telegram.</p>' +
+          '<div class="field"><span class="label" id="tPrioLabel">Приоритет</span><div class="radio-chips" role="radiogroup" aria-labelledby="tPrioLabel">' +
+            [['low', 'Низкий'], ['medium', 'Обычный'], ['high', 'Важно']].map(([v, l]) =>
+              '<label><input type="radio" name="priority" value="' + v + '"' + ((t.priority || 'medium') === v ? ' checked' : '') + '><span>' + l + '</span></label>').join('') +
+          '</div></div>' +
+          (t.raw_transcript ? '<p class="quote"><span class="label">Как было сказано</span>«' + esc(t.raw_transcript) + '»</p>' : ''),
+        primary: isNew ? 'Добавить задачу' : 'Сохранить задачу',
+        canDelete: !isNew,
+        onSave: async (f) => {
+          const date = f.date.value;
+          const time = f.time.value;
+          let due_datetime = null;
+          let is_date_only = false;
+          if (date && time) {
+            due_datetime = new Date(Date.parse(date + 'T' + time + ':00Z') - TZ_OFFSET_MS).toISOString().slice(0, 19).replace('T', ' ');
+          } else if (date) {
+            due_datetime = date + ' 00:00:00';
+            is_date_only = true;
+          }
+          const body = { title: f.title.value.trim(), due_datetime, is_date_only, priority: f.priority.value };
+          if (isNew) await api('/api/tasks', { method: 'POST', body });
+          else await api('/api/tasks/' + t.id, { method: 'PATCH', body });
+          toast(isNew ? 'Задача добавлена' : 'Задача сохранена');
+          refresh();
+        },
+        onDelete: async () => {
+          await api('/api/tasks/' + t.id, { method: 'DELETE' });
+          toast('Задача удалена');
+          refresh();
+        }
+      });
+    }
+
+    // ================= Notes =================
+    let noteSearchTimer = null;
+    let noteReq = 0;
+    async function loadNotes() {
+      const req = ++noteReq;
+      startLoading('noteFrame');
+      let url = '/api/notes?q=' + encodeURIComponent(S.noteQuery);
+      try {
+        const data = await api(url);
+        if (req !== noteReq) return; // typing in search fires several loads
+        S.notes = data.notes || [];
+        remember('note', S.notes);
+        stopLoading('noteFrame');
+        renderNotes();
+      } catch (e) {
+        if (e instanceof AuthError) return;
+        errorState('noteFrame', 'заметки', 'reload-notes');
+      }
+    }
+
+    function renderNotes() {
+      const frame = $('noteFrame');
+      const list = S.notes || [];
+      if (!list.length) {
+        frame.innerHTML = S.noteQuery
+          ? stateHtml('Ничего не найдено', 'Попробуйте другое слово или очистите поиск.',
+              '<button type="button" class="btn primary" data-action="clear-note-search">Очистить поиск</button>')
+          : stateHtml('Заметок пока нет', 'Сюда попадает всё, что вы надиктовали на память. Например: «запомни код от шлагбаума 4821».',
+              '<button type="button" class="btn primary" data-action="new-note">Добавить заметку</button>');
+        return;
+      }
+      frame.innerHTML = '<ul class="cards">' + list.map(n => {
+        const secret = n.category === 'credentials';
+        const ts = parseTs(n.created_at);
+        return '<li class="card-item"><button type="button" class="row" data-action="open" data-kind="note" data-id="' + n.id + '">' +
+          '<span class="kind k-note" style="align-self:flex-start">' + icon('note') + '</span>' +
+          '<span class="row-main">' +
+            '<span class="row-title">' + esc(n.title || 'Без названия') + '</span>' +
+            (secret ? '<span class="row-sub masked">••••••••</span>' : (n.content ? '<span class="row-sub">' + esc(n.content) + '</span>' : '')) +
+            (ts ? '<span class="row-meta">' + esc(dayName(localKey(ts)) + ', ' + timeOf(ts)) + '</span>' : '') +
+          '</span></button></li>';
+      }).join('') + '</ul>';
+    }
+
+    function noteSheet(n) {
+      const isNew = !n;
+      n = n || { title: '', content: '', category: 'general', tags: '' };
+      const secret = !isNew && n.category === 'credentials';
+      const revealed = S.revealed.has(n.id);
+      openSheet({
+        title: isNew ? 'Новая заметка' : 'Заметка',
+        entity: { kind: 'note', id: n.id, name: n.title || 'без названия', noun: 'заметку' },
+        body:
+          (secret && !revealed
+            ? '<div class="field"><span class="label">Содержимое</span><div class="secret"><div class="value masked">••••••••••••</div>' +
+                '<button type="button" class="btn" data-action="reveal-note" data-id="' + n.id + '">' + icon('eye') + 'Показать</button></div></div>'
+            : '') +
+          '<div class="field"><label for="nTitle">Заголовок</label><input id="nTitle" name="title" type="text" value="' + esc(n.title) + '" autocomplete="off"></div>' +
+          '<div class="field"' + (secret && !revealed ? ' hidden' : '') + '><label for="nContent">Текст</label>' +
+            '<textarea id="nContent" name="content" data-validate="required" required>' + esc(n.content) + '</textarea>' +
+            '<p class="error" id="nContent-error" hidden>Напишите текст заметки</p>' +
+            (secret ? '<button type="button" class="btn quiet" data-action="copy-note" style="margin-top:4px">' + icon('copy') + 'Скопировать текст</button>' : '') +
+          '</div>' +
+          (n.raw_transcript && !secret ? '<p class="quote"><span class="label">Как было сказано</span>«' + esc(n.raw_transcript) + '»</p>' : ''),
+        primary: isNew ? 'Добавить заметку' : 'Сохранить заметку',
+        canDelete: !isNew,
+        onSave: async (f) => {
+          // Type and tags are no longer shown; existing values are kept as they were
+          const body = { title: f.title.value.trim(), content: f.content.value.trim(), category: n.category || 'general', tags: n.tags || '' };
+          if (isNew) await api('/api/notes', { method: 'POST', body });
+          else await api('/api/notes/' + n.id, { method: 'PATCH', body });
+          toast(isNew ? 'Заметка добавлена' : 'Заметка сохранена');
+          refresh();
+        },
+        onDelete: async () => {
+          await api('/api/notes/' + n.id, { method: 'DELETE' });
+          toast('Заметка удалена');
+          refresh();
+        }
+      });
+    }
+
+    // ================= Words =================
+    async function loadWords() {
+      if (S.wordMode === 'top') return loadTop();
+      const body = $('wordsBody');
+      if (!body.innerHTML.trim()) body.innerHTML = '<div id="wordsFrame"></div>';
+      try {
+        const data = await api('/api/vocabulary');
+        S.words = data.words || data.vocabulary || [];
+        remember('word', S.words);
+        if (S.cardIdx >= S.words.length) S.cardIdx = 0;
+        renderWords();
+      } catch (e) {
+        if (e instanceof AuthError) return;
+        body.innerHTML = '<div id="wordsFrame"></div>';
+        errorState('wordsFrame', 'слова', 'reload-words');
+      }
+    }
+
+    function renderWords() {
+      setPressed('[data-action="word-mode"]', S.wordMode);
+      if (S.wordMode === 'top') return renderTop();
+      const body = $('wordsBody');
+      const list = S.words || [];
+      if (!list.length) {
+        body.innerHTML = stateHtml('Словарь пуст', 'Спросите «как переводится resilient» или «что значит tow truck», и слово появится здесь с переводом и примером.',
+          '<button type="button" class="btn primary" data-action="new-word">Добавить слово</button>');
+        return;
+      }
+      if (S.wordMode === 'cards') {
+        const w = list[S.cardIdx];
+        body.innerHTML =
+          '<div class="card">' +
+            '<p class="card-word" lang="en">' + esc(w.word) + '</p>' +
+            (w.phonetic ? '<p class="card-phon">' + esc(w.phonetic) + '</p>' : '') +
+            (S.cardFlipped
+              ? '<div class="card-back"><p class="card-trans">' + esc(w.translation || '') + '</p>' +
+                (w.example ? '<p class="card-ex" lang="en">«' + esc(w.example) + '»</p>' : '') + '</div>'
+              : '<button type="button" class="btn primary" data-action="flip" style="margin-top:16px">Показать перевод</button>') +
+          '</div>' +
+          '<div class="card-nav">' +
+            '<button type="button" class="btn" data-action="card-prev">' + icon('left') + 'Назад</button>' +
+            '<span class="card-count">' + (S.cardIdx + 1) + ' из ' + list.length + '</span>' +
+            '<button type="button" class="btn" data-action="card-next">Дальше' + icon('right') + '</button>' +
+          '</div>';
+      } else {
+        body.innerHTML = '<ul class="cards">' + list.map(w =>
+          '<li class="card-item"><button type="button" class="row" data-action="open" data-kind="word" data-id="' + w.id + '">' +
+            '<span class="kind k-word">' + icon('book') + '</span>' +
+            '<span class="row-main"><span class="row-title" lang="en">' + esc(w.word) + '</span>' +
+            '<span class="row-meta">' + esc([w.translation, w.phonetic].filter(Boolean).join(', ')) + '</span>' +
+            '</span></button></li>').join('') + '</ul>';
+      }
+    }
+
+    // ================= Top-1000 words: groups of 20, study cards, tests =================
+    const T = { words: null, groups: {}, screen: 'groups', group: 0, idx: 0, flipped: false, quiz: null };
+    const TOP_SIZE = 20;
+    const TOP_NEED = 3;    // flawless (100%) test runs of a group that open the next one
+    // group 1 is always open; group n opens after group n-1 was done flawlessly TOP_NEED times
+    function topUnlocked(n) { return n <= 1 || ((T.groups[n - 1] || {}).perfect || 0) >= TOP_NEED; }
+
+    function topWordsOf(g) { return g ? T.words.slice((g - 1) * TOP_SIZE, g * TOP_SIZE) : T.words; }
+    function shuffled(a) {
+      const r = a.slice();
+      for (let i = r.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [r[i], r[j]] = [r[j], r[i]]; }
+      return r;
+    }
+    function topState(n) {
+      if (!topUnlocked(n)) return 'Закрыта';
+      const g = T.groups[n] || {};
+      const perfect = g.perfect || 0;
+      if (perfect >= TOP_NEED) return 'Пройдена';
+      if (g.best != null) return 'Без ошибок ' + perfect + ' из ' + TOP_NEED;
+      return g.studied ? 'Изучено, теста нет' : 'Не начата';
+    }
+
+    async function loadTop() {
+      const body = $('wordsBody');
+      if (!T.words) body.innerHTML = '<div class="skeleton" aria-hidden="true"><div></div><div></div></div>';
+      try {
+        const d = await api('/api/top-words');
+        T.words = d.words || [];
+        T.groups = d.groups || {};
+      } catch (e) {
+        if (e instanceof AuthError) return;
+        body.innerHTML = '<div id="wordsFrame"></div>';
+        errorState('wordsFrame', 'слова', 'reload-words');
+        return;
+      }
+      renderTop();
+    }
+
+    function topSaveProgress(payload) {
+      const g = T.groups[payload.group] || (T.groups[payload.group] = {});
+      if (payload.studied) g.studied = true;
+      if (payload.score != null) {
+        g.last = payload.score; g.best = Math.max(g.best || 0, payload.score); g.attempts = (g.attempts || 0) + 1;
+        if (payload.score === 100) g.perfect = (g.perfect || 0) + 1;
+      }
+      api('/api/top-words/progress', { method: 'POST', body: payload }).catch(() => {});
+    }
+
+    function renderTop() {
+      const body = $('wordsBody');
+      if (!T.words) { loadTop(); return; }
+      if (T.screen === 'study') return renderTopStudy(body);
+      if (T.screen === 'quiz') return renderTopQuiz(body);
+      if (T.screen === 'result') return renderTopResult(body);
+      if (T.screen === 'group') return renderTopGroup(body);
+      const count = Math.ceil(T.words.length / TOP_SIZE);
+      let passed = 0, rows = '';
+      for (let n = 1; n <= count; n++) {
+        const g = T.groups[n] || {};
+        if ((g.perfect || 0) >= TOP_NEED) passed++;
+        const first = (n - 1) * TOP_SIZE + 1;
+        const open = topUnlocked(n);
+        rows += '<li class="card-item"><button type="button" class="row" data-action="' + (open ? 'top-group' : 'top-locked') + '" data-id="' + n + '"' + (open ? '' : ' aria-disabled="true" style="opacity:.55"') + '>' +
+          '<span class="kind k-word k-num">' + n + '</span>' +
+          '<span class="row-main"><span class="row-title">Группа ' + n + '</span>' +
+          '<span class="row-meta">Слова ' + first + '–' + Math.min(n * TOP_SIZE, T.words.length) + '</span></span>' +
+          '<span class="row-end"><span class="row-meta">' + esc(topState(n)) + '</span></span></button></li>';
+      }
+      body.innerHTML =
+        '<div class="top-stack">' +
+          '<div class="top-head"><p>Пройдено групп: ' + passed + ' из ' + count + '. Следующая группа открывается, когда предыдущая решена ' + TOP_NEED + ' раза без ошибок.</p>' +
+            '<div class="top-bar" role="progressbar" aria-valuemin="0" aria-valuemax="' + count + '" aria-valuenow="' + passed + '"><span style="width:' + Math.round(passed / count * 100) + '%"></span></div></div>' +
+          '<button type="button" class="btn primary" data-action="top-test" data-id="0">Общий тест: 20 слов из всех ' + T.words.length + '</button>' +
+          (T.groups[0] && T.groups[0].best != null ? '<p class="hint">Общий тест: лучший ' + T.groups[0].best + '%, последний ' + T.groups[0].last + '%, попыток ' + T.groups[0].attempts + '</p>' : '') +
+          '<ul class="cards">' + rows + '</ul>' +
+        '</div>';
+    }
+
+    function renderTopGroup(body) {
+      const n = T.group;
+      const list = topWordsOf(n);
+      body.innerHTML =
+        '<div class="top-stack">' +
+          '<button type="button" class="btn" data-action="top-home">' + icon('left') + 'Все группы</button>' +
+          '<div class="top-head"><h2>Группа ' + n + '</h2><p>' + esc(topState(n)) + '. Тест без ошибок ' + TOP_NEED + ' раза откроет следующую группу.</p></div>' +
+          '<div class="actions" style="display:flex; gap:8px; flex-wrap:wrap">' +
+            '<button type="button" class="btn primary" data-action="top-study" data-id="' + n + '">Учить карточки</button>' +
+            '<button type="button" class="btn" data-action="top-test" data-id="' + n + '">Пройти тест</button>' +
+          '</div>' +
+          '<ul class="cards">' + list.map(w =>
+            '<li class="card-item"><div class="row"><span class="row-main"><span class="row-title" lang="en">' + esc(w.word) + '</span>' +
+            '<span class="row-meta">' + esc([w.translation, w.phonetic].filter(Boolean).join(', ')) + '</span></span></div></li>').join('') + '</ul>' +
+        '</div>';
+    }
+
+    function renderTopStudy(body) {
+      const list = topWordsOf(T.group);
+      const w = list[T.idx];
+      const last = T.idx === list.length - 1;
+      body.innerHTML =
+        '<div class="top-stack">' +
+          '<button type="button" class="btn" data-action="top-group" data-id="' + T.group + '">' + icon('left') + 'Группа ' + T.group + '</button>' +
+          '<div class="card">' +
+            '<p class="card-word" lang="en">' + esc(w.word) + '</p>' +
+            (w.phonetic ? '<p class="card-phon">' + esc(w.phonetic) + '</p>' : '') +
+            (T.flipped
+              ? '<div class="card-back"><p class="card-trans">' + esc(w.translation) + '</p></div>'
+              : '<button type="button" class="btn primary" data-action="top-flip" style="margin-top:16px">Показать перевод</button>') +
+          '</div>' +
+          '<div class="card-nav">' +
+            '<button type="button" class="btn" data-action="top-prev"' + (T.idx === 0 ? ' disabled' : '') + '>' + icon('left') + 'Назад</button>' +
+            '<span class="card-count">' + (T.idx + 1) + ' из ' + list.length + '</span>' +
+            '<button type="button" class="btn' + (last ? ' primary' : '') + '" data-action="top-next">' + (last ? 'Готово' : 'Дальше' + icon('right')) + '</button>' +
+          '</div>' +
+        '</div>';
+    }
+
+    function topNextCard() {
+      const list = topWordsOf(T.group);
+      haptic('light');
+      if (T.idx < list.length - 1) { T.idx++; T.flipped = false; renderTop(); return; }
+      topSaveProgress({ group: T.group, studied: true });
+      toast('Группа ' + T.group + ' изучена. Теперь тест');
+      T.screen = 'group';
+      renderTop();
+    }
+
+    // group 0 = the general test: 20 random words from all of them
+    function topStartTest(group) {
+      if (group && !topUnlocked(group)) return;
+      const pool = group ? topWordsOf(group) : shuffled(T.words).slice(0, TOP_SIZE);
+      const qs = shuffled(pool).map(w => {
+        const wrong = shuffled(T.words.filter(x => x.id !== w.id && x.translation !== w.translation)).slice(0, 3);
+        return { w, options: shuffled([w].concat(wrong)).map(x => x.translation), picked: null };
+      });
+      T.quiz = { group, qs, i: 0 };
+      T.screen = 'quiz';
+      haptic('light');
+      renderTop();
+    }
+
+    function renderTopQuiz(body) {
+      const q = T.quiz;
+      const cur = q.qs[q.i];
+      const answered = cur.picked != null;
+      const opts = cur.options.map((o, k) => {
+        let cls = 'btn';
+        if (answered && o === cur.w.translation) cls += ' is-right';
+        else if (answered && k === cur.picked) cls += ' is-wrong';
+        return '<button type="button" class="' + cls + '" data-action="top-answer" data-id="' + k + '"' + (answered ? ' disabled' : '') + '>' + esc(o) + '</button>';
+      }).join('');
+      body.innerHTML =
+        '<div class="top-stack">' +
+          '<div class="top-head"><p>' + (q.group ? 'Группа ' + q.group : 'Общий тест') + ' · вопрос ' + (q.i + 1) + ' из ' + q.qs.length + '</p>' +
+            '<div class="top-bar"><span style="width:' + Math.round(q.i / q.qs.length * 100) + '%"></span></div></div>' +
+          '<div class="card"><p class="card-word" lang="en">' + esc(cur.w.word) + '</p>' +
+            (cur.w.phonetic ? '<p class="card-phon">' + esc(cur.w.phonetic) + '</p>' : '') + '</div>' +
+          '<div class="quiz-opts">' + opts + '</div>' +
+          (answered ? '<button type="button" class="btn primary" data-action="top-after">' + (q.i === q.qs.length - 1 ? 'Показать результат' : 'Дальше') + '</button>' : '') +
+        '</div>';
+    }
+
+    function topAnswer(k) {
+      const cur = T.quiz.qs[T.quiz.i];
+      if (cur.picked != null) return;
+      cur.picked = k;
+      haptic(cur.options[k] === cur.w.translation ? 'success' : 'warning');
+      renderTop();
+    }
+
+    function topAfterAnswer() {
+      const q = T.quiz;
+      if (q.i < q.qs.length - 1) { q.i++; renderTop(); return; }
+      const right = q.qs.filter(x => x.options[x.picked] === x.w.translation).length;
+      q.right = right;
+      q.score = Math.round(right / q.qs.length * 100);
+      topSaveProgress({ group: q.group, score: q.score });
+      T.screen = 'result';
+      renderTop();
+    }
+
+    function renderTopResult(body) {
+      const q = T.quiz;
+      const wrong = q.qs.filter(x => x.options[x.picked] !== x.w.translation);
+      const perfect = q.group ? ((T.groups[q.group] || {}).perfect || 0) : 0;
+      let note;
+      if (!q.group) note = q.score + '%.';
+      else if (q.score === 100) note = perfect >= TOP_NEED
+        ? 'Без ошибок! ' + (q.group < T.words.length / TOP_SIZE ? 'Группа ' + (q.group + 1) + ' открыта.' : 'Это последняя группа.')
+        : 'Без ошибок! Засчитано ' + perfect + ' из ' + TOP_NEED + '. Ещё ' + (TOP_NEED - perfect) + ' — и откроется следующая группа.';
+      else note = q.score + '%. Есть ошибки, этот раз не засчитан. Нужны ' + TOP_NEED + ' прохождения без ошибок (сейчас ' + perfect + ').';
+      body.innerHTML =
+        '<div class="top-stack">' +
+          '<div class="top-head"><p>' + (q.group ? 'Группа ' + q.group : 'Общий тест') + '</p>' +
+            '<p class="top-score">' + q.right + ' из ' + q.qs.length + '</p>' +
+            '<p>' + esc(note) + '</p></div>' +
+          (wrong.length
+            ? '<div><h3 style="margin:0 0 8px">Ошибки</h3><ul class="cards">' + wrong.map(x =>
+                '<li class="card-item"><div class="row"><span class="row-main"><span class="row-title" lang="en">' + esc(x.w.word) + '</span>' +
+                '<span class="row-meta">' + esc(x.w.translation) + '</span></span></div></li>').join('') + '</ul></div>'
+            : '<p class="hint">Без ошибок.</p>') +
+          '<div class="actions" style="display:flex; gap:8px; flex-wrap:wrap">' +
+            '<button type="button" class="btn primary" data-action="top-test" data-id="' + q.group + '">Пройти ещё раз</button>' +
+            (q.group ? '<button type="button" class="btn" data-action="top-study" data-id="' + q.group + '">Учить карточки</button>' : '') +
+            '<button type="button" class="btn" data-action="top-home">Все группы</button>' +
+          '</div>' +
+        '</div>';
+    }
+
+    // ================= Debts (expenses marked "это долг"; opened from Settings) =================
+    let debtsOwe = false;   // false = "Кто мне должен", true = "Кому я должен"
+    async function debtsSheet(owe) {
+      if (typeof owe === 'boolean') debtsOwe = owe;
+      owe = debtsOwe;
+      openSheet({ title: owe ? 'Кому я должен' : 'Кто мне должен', kind: 'debts', body: '<div class="skeleton" aria-hidden="true"><div></div><div></div></div>', noFooter: true });
+      let data;
+      try {
+        data = await api('/api/debts?currency=' + S.currency + (owe ? '&dir=owe' : ''));
+      } catch (e) {
+        if (e instanceof AuthError) return;
+        const b = $('sheet').querySelector('.sheet-body');
+        if (b) b.innerHTML = stateHtml('Не удалось загрузить долги', 'Проверьте соединение и попробуйте снова.',
+          '<button type="button" class="btn primary" data-action="' + (owe ? 'debts-owe' : 'debts') + '">Повторить загрузку</button>');
+        return;
+      }
+      const body = $('sheet').querySelector('.sheet-body');
+      if (!body || !sheetCfg || sheetCfg.kind !== 'debts') return;
+      const items = data.items || [];
+      S.debts = {};
+      items.forEach(d => { S.debts[d.id] = d; });
+      remember('finance', items);
+      const open = items.filter(d => d.debt_left > 0.005);
+      const closed = items.filter(d => d.debt_left <= 0.005);
+      if (!items.length) {
+        body.innerHTML = stateHtml('Долгов нет', owe
+          ? 'Откройте трату и включите «Это долг» и «Я должен», либо скажите «Я должен Арбузу 100 тысяч». Долги соберутся здесь.'
+          : 'Откройте трату и включите «Это долг», либо скажите «Арбуз должен мне 100 тысяч». Долги соберутся здесь.', '');
+        return;
+      }
+      const row = (d) => {
+        const ts = parseTs(d.created_at);
+        const done = d.debt_left <= 0.005;
+        const partial = !done && Number(d.debt_paid) > 0 ? 'из ' + money(d.original_amount, d.original_currency) : '';
+        return '<li class="card-item"><button type="button" class="row" data-action="open-debt" data-id="' + d.id + '">' +
+          '<span class="kind k-money">' + icon('wallet') + '</span>' +
+          '<span class="row-main"><span class="row-title">' + esc(d.title) + '</span>' +
+          '<span class="row-meta">' + esc((done ? (owe ? 'Вернули долг' : 'Вернули всё') : (owe ? 'Вы должны' : 'Должен вам')) + (ts ? ' · ' + dayName(localKey(ts)) : '')) + '</span></span>' +
+          '<span class="row-end"><span class="row-amount">' + esc(money(done ? d.original_amount : d.debt_left, d.original_currency)) + '</span>' +
+          (partial ? '<span class="row-meta">' + esc(partial) + '</span>' : '') + '</span></button></li>';
+      };
+      body.innerHTML =
+        '<section class="hero" style="padding-top:0"><h3 class="hero-label">' + (owe ? 'Вы должны' : 'Вам должны') + '</h3><p class="hero-amount">' + esc(money(data.total, data.currency)) + '</p></section>' +
+        (open.length ? '<ul class="cards">' + open.map(row).join('') + '</ul>' : '<p class="hint">Все долги возвращены.</p>') +
+        (closed.length ? '<h3 style="margin:20px 0 8px">Возвращённые</h3><ul class="cards">' + closed.map(row).join('') + '</ul>' : '');
+    }
+
+    function debtPaySheet(d) {
+      const done = d.debt_left <= 0.005;
+      openSheet({
+        title: 'Долг: ' + d.title,
+        kind: 'debt-pay',
+        noFooter: true,
+        body:
+          '<div class="settings-group"><h3>' + (done ? 'Долг возвращён' : 'Осталось ' + esc(money(d.debt_left, d.original_currency))) + '</h3>' +
+            '<p class="hint">' + (d.debt_owe ? 'Занято ' : 'Одолжено ') + esc(money(d.original_amount, d.original_currency)) +
+              (Number(d.debt_paid) > 0 ? ', ' + (d.debt_owe ? 'вы вернули ' : 'вернули ') + esc(money(d.debt_paid, d.original_currency)) : '') + '.</p>' +
+            (done ? '' :
+              '<div class="field"><label for="dPay">' + (d.debt_owe ? 'Вернул часть' : 'Вернули часть') + '</label><input id="dPay" type="text" inputmode="decimal" autocomplete="off"><p class="hint">Сколько ' + (d.debt_owe ? 'вернул' : 'вернули') + ' сейчас, например 30000</p></div>' +
+              '<div class="actions" style="display:flex; gap:8px; flex-wrap:wrap">' +
+                '<button type="button" class="btn primary" data-action="debt-pay" data-id="' + d.id + '">Записать возврат</button>' +
+                '<button type="button" class="btn" data-action="debt-pay-all" data-id="' + d.id + '">' + (d.debt_owe ? 'Вернул всё' : 'Вернули всё') + '</button>' +
+              '</div>') +
+          '</div>' +
+          '<button type="button" class="btn" data-action="open" data-kind="finance" data-id="' + d.id + '">Открыть трату</button>'
+      });
+    }
+
+    async function payDebtAction(id, all) {
+      const d = S.debts && S.debts[id];
+      if (!d) return;
+      const amount = parseFloat(String(all ? '' : ($('dPay').value || '')).replace(/\s/g, '').replace(',', '.'));
+      if (!all && !(amount > 0)) { $('dPay').focus(); toast('Введите, сколько вернули'); return; }
+      try {
+        const r = await api('/api/debts/' + id + '/pay', { method: 'POST', body: all ? { all: true } : { amount } });
+        haptic('success');
+        toast(r.left > 0 ? 'Записано. Осталось ' + money(r.left, d.original_currency) : 'Долг закрыт');
+        setTimeout(debtsSheet, 220);
+        refresh();
+      } catch (e) {
+        if (!(e instanceof AuthError)) failToast('записать возврат', () => payDebtAction(id, all));
+      }
+    }
+
+// ================= Settings: daily limit, word reminders =================
+    const VOCAB_MODES = { off: 'Не присылать', daily: 'Раз в день', twice: 'Два раза в день', often: 'Каждые 3 часа' };
+    const CURRENCY_SIGNS = { VND: '₫', USD: '$', RUB: '₽', AED: 'AED', KZT: '₸', UAH: '₴', EUR: '€' };
+    const CURRENCY_NAMES = { RUB: 'Рубли, ₽', VND: 'Донги, ₫', USD: 'Доллары, $', KZT: 'Тенге, ₸', UAH: 'Гривны, ₴', EUR: 'Евро, €', AED: 'Дирхамы, AED' };
+
+    // First run: the person picks the currency and the time zone from lists (nothing is detected from the phone)
+    async function loadProfile() {
+      try {
+        const s = await api('/api/settings?currency=' + S.currency);
+        S.profile = s;
+        if (Number.isFinite(s.tz_offset_min)) TZ_OFFSET_MS = s.tz_offset_min * 60000;
+        if (!s.setup_done && s.default_currency) { S.currency = s.default_currency; $('currencySel').value = S.currency; }
+      } catch (e) {}
+    }
+    function offsetLabel(min) {
+      const a = Math.abs(min), h = Math.floor(a / 60), m = a % 60;
+      return 'UTC' + (min < 0 ? '−' : '+') + h + (m ? ':' + String(m).padStart(2, '0') : '');
+    }
+    function firstRunSheet(s) {
+      const cur = (s.default_currency || 'RUB'), tz = s.timezone || 'Europe/Moscow';
+      openSheet({
+        title: 'Добро пожаловать', kind: 'first-run', primary: 'Продолжить',
+        body:
+          '<p class="hint" style="margin:0 0 var(--s4)">Два вопроса, чтобы траты считались в вашей валюте, а день менялся в полночь по вашему времени. Позже это не изменить без обращения в поддержку.</p>' +
+          '<div class="field"><label for="frCur">Валюта</label><select id="frCur" name="currency">' +
+            (s.supported_currencies || []).map(c => '<option value="' + esc(c) + '"' + (c === cur ? ' selected' : '') + '>' + esc(CURRENCY_NAMES[c] || c) + '</option>').join('') +
+          '</select></div>' +
+          '<div class="field"><label for="frTz">Ваш город</label><select id="frTz" name="tz">' +
+            (s.timezones || []).map(t => '<option value="' + esc(t.id) + '"' + (t.id === tz ? ' selected' : '') + '>' + esc(t.label + ', ' + offsetLabel(t.offset_min)) + '</option>').join('') +
+          '</select></div>',
+        onSave: async (f) => {
+          const r = await api('/api/settings', { method: 'PUT', body: { default_currency: f.currency.value, timezone: f.tz.value, setup_done: true } });
+          S.profile = r;
+          if (Number.isFinite(r.tz_offset_min)) TZ_OFFSET_MS = r.tz_offset_min * 60000;
+          S.currency = f.currency.value; $('currencySel').value = S.currency; savePrefs();
+          toast('Готово');
+          refresh();
+        }
+      });
+    }
+
+    function subDate(iso) {
+      const d = new Date(iso);
+      return isNaN(d) ? '' : d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+    }
+    // The "Подписка" group at the top of Settings. The owner has no limits, so the card is not shown to them.
+    function subscriptionCard(sub) {
+      if (!sub || sub.state === 'owner') return '';
+      const st = sub.state, until = sub.sub_until ? subDate(sub.sub_until) : '';
+      const live = st === 'trial' || st === 'active';
+      const title = { trial: 'Пробный период', active: 'Подписка', expired: 'Подписка закончилась', new: 'Нет подписки' }[st] || 'Подписка';
+      let html = '<div class="settings-group sub-card"><h3>Подписка</h3>' +
+        '<div class="sub-line"><span>' + esc(title) + '</span>' + (until && st !== 'new' ? '<span class="until">' + (live ? 'до ' : '') + esc(until) + '</span>' : '') + '</div>';
+      if (live && sub.daily_limit > 0) {
+        const pct = Math.min(100, Math.round(100 * sub.used_today / sub.daily_limit));
+        html += '<p class="hint">Записей сегодня: ' + esc(sub.used_today) + ' из ' + esc(sub.daily_limit) + '</p>' +
+          '<div class="top-bar" role="img" aria-label="Использовано ' + pct + '% дневного лимита"><span style="width:' + pct + '%"></span></div>';
+      } else {
+        html += '<p class="hint">Смотреть, править и удалять свои записи можно. Добавлять новые — после оформления.</p>';
+      }
+      if (sub.can_start_trial) html += '<button type="button" class="btn primary" data-action="sub-trial">Начать пробный период на ' + esc(sub.trial_days) + ' дн.</button>';
+      const buy = (live ? 'Продлить' : 'Оформить') + ' за ' + esc(sub.price_stars) + ' Stars';
+      html += '<button type="button" class="btn' + (sub.can_start_trial ? '' : ' primary') + '" data-action="sub-buy">' + buy + '</button>';
+      if (sub.support) {
+        const nick = String(sub.support).replace(/^@/, '');
+        html += '<p class="hint">Поддержка: <a href="https://t.me/' + esc(nick) + '">' + esc(sub.support) + '</a></p>';
+      }
+      return html + '</div>';
+    }
+    async function subTrial(el) {
+      el.disabled = true;
+      try {
+        await api('/api/subscription/trial', { method: 'POST' });
+        haptic('success');
+        toast('Пробный период начался');
+        settingsSheet();
+      } catch (e) {
+        el.disabled = false;
+        if (e instanceof AuthError) return;
+        toast(e.message && e.message !== 'network' ? e.message : 'Не удалось начать пробный период. Попробуйте снова.');
+      }
+    }
+    async function subBuy(el) {
+      el.disabled = true;
+      try {
+        const r = await api('/api/subscription/invoice', { method: 'POST' });
+        el.disabled = false;
+        if (tg && tg.openInvoice) {
+          tg.openInvoice(r.link, (status) => {
+            if (status === 'paid') { haptic('success'); toast('Оплачено. Подписка скоро обновится'); setTimeout(settingsSheet, 1500); }
+            else if (status === 'failed') toast('Оплата не прошла. Деньги не списаны.');
+          });
+        } else {
+          window.open(r.link, '_blank');
+        }
+      } catch (e) {
+        el.disabled = false;
+        if (e instanceof AuthError) return;
+        toast('Не получилось выставить счёт. Попробуйте позже.');
+      }
+    }
+
+    // Personal token for the iPhone Shortcut: issued here (or by /token in the bot), shown once, kept by the server only as a hash
+    async function shortcutSheet() {
+      openSheet({ title: 'Кнопка на iPhone', kind: 'shortcut', body: '<div class="skeleton" aria-hidden="true"><div></div><div></div></div>', noFooter: true });
+      let info;
+      try { info = await api('/api/shortcut'); }
+      catch (e) {
+        if (e instanceof AuthError) return;
+        const b = $('sheet').querySelector('.sheet-body');
+        if (b) b.innerHTML = stateHtml('Не удалось загрузить', 'Проверьте соединение и попробуйте снова.', '<button type="button" class="btn primary" data-action="shortcut">Повторить загрузку</button>');
+        return;
+      }
+      const body = $('sheet').querySelector('.sheet-body');
+      if (!body || !sheetCfg || sheetCfg.kind !== 'shortcut') return;
+      const steps = (info.ready && info.ready.length ? info.ready : info.manual) || [];
+      body.innerHTML =
+        '<div class="settings-group"><h3>Токен</h3>' +
+          '<div id="tokenBox"><p class="hint" style="margin-top:0">' + (info.has_token ? 'Токен уже выдан. Он показывается один раз. Если потеряли, получите новый: старый перестанет работать.' : 'Токен — это ваш личный пароль для кнопки. Он показывается один раз.') + '</p>' +
+          '<button type="button" class="btn primary" data-action="token-issue">' + (info.has_token ? 'Получить новый токен' : 'Получить токен') + '</button></div></div>' +
+        '<div class="settings-group"><h3>Как подключить</h3><ol class="steps" style="margin:0; padding-left:20px; display:grid; gap:8px">' +
+          steps.map(s => '<li>' + esc(s) + '</li>').join('') + '</ol></div>' +
+        '<div class="settings-group"><h3>Как вынести на кнопку</h3><ol class="steps" style="margin:0; padding-left:20px; display:grid; gap:8px">' +
+          (info.placement || []).map(s => '<li>' + esc(s) + '</li>').join('') + '</ol></div>';
+    }
+    async function issueTokenAction(el) {
+      el.disabled = true;
+      try {
+        const r = await api('/api/token', { method: 'POST' });
+        const box = $('tokenBox');
+        if (!box) return;
+        box.innerHTML = '<div class="secret"><span class="value" id="tokenValue">' + esc(r.token) + '</span>' +
+          '<button type="button" class="btn" data-action="token-copy">Копировать</button></div>' +
+          '<p class="hint">Сохраните его сейчас: больше он не покажется. Никому его не отправляйте.</p>';
+        haptic('success');
+      } catch (e) {
+        el.disabled = false;
+        if (e instanceof AuthError) return;
+        toast('Не удалось получить токен. Попробуйте снова.');
+      }
+    }
+    async function copyToken() {
+      const v = $('tokenValue') && $('tokenValue').textContent;
+      if (!v) return;
+      try { await navigator.clipboard.writeText(v); toast('Скопировано'); }
+      catch (e) { toast('Не удалось скопировать. Выделите токен и скопируйте вручную.'); }
+    }
+
+    // Terms (same text as the bot's /terms) and erasing one's data
+    async function termsSheet() {
+      openSheet({ title: 'Условия и данные', kind: 'terms', body: '<div class="skeleton" aria-hidden="true"><div></div><div></div></div>', noFooter: true });
+      let data;
+      try { data = await api('/api/terms'); }
+      catch (e) {
+        if (e instanceof AuthError) return;
+        const b = $('sheet').querySelector('.sheet-body');
+        if (b) b.innerHTML = stateHtml('Не удалось загрузить', 'Проверьте соединение и попробуйте снова.', '<button type="button" class="btn primary" data-action="terms">Повторить загрузку</button>');
+        return;
+      }
+      const body = $('sheet').querySelector('.sheet-body');
+      if (!body || !sheetCfg || sheetCfg.kind !== 'terms') return;
+      body.innerHTML = (data.sections || []).map(s => '<div class="settings-group"><h3>' + esc(s[0]) + '</h3><p class="hint" style="margin:0">' + esc(s[1]) + '</p></div>').join('');
+    }
+    function deleteMeSheet() {
+      openSheet({ title: 'Удалить все мои данные?', kind: 'delete-me', noFooter: true,
+        body: '<p class="hint" style="margin-top:0">Будут стёрты все ваши траты, задачи, заметки, слова и настройки. Вернуть их будет нельзя. Подписка и оплаты останутся.</p>' +
+          '<div class="actions" style="display:grid; gap:8px; margin-top:16px">' +
+          '<button type="button" class="btn danger" data-action="delete-me-confirm">Да, удалить всё</button>' +
+          '<button type="button" class="btn" data-action="close-sheet">Отмена</button></div>' });
+    }
+    async function deleteMeAction(el) {
+      el.disabled = true;
+      try {
+        await api('/api/account/delete', { method: 'POST', body: { confirm: true } });
+        haptic('success');
+        closeSheet();
+        toast('Все ваши данные удалены');
+        refresh();
+      } catch (e) {
+        el.disabled = false;
+        if (e instanceof AuthError) return;
+        toast('Не удалось удалить. Попробуйте снова.');
+      }
+    }
+
+    async function settingsSheet() {
+      // Saving before the settings arrive just closes the sheet; the real onSave is set once they load
+      openSheet({ title: 'Настройки', kind: 'settings', body: '<div class="skeleton" aria-hidden="true"><div></div><div></div></div>', primary: 'Сохранить настройки', onSave: async () => {} });
+      let s, sub = null;
+      try {
+        // The subscription card is optional: if it fails to load, the rest of the settings still open
+        [s, sub] = await Promise.all([api('/api/settings?currency=' + S.currency), api('/api/subscription').catch(() => null)]);
+      } catch (e) {
+        if (e instanceof AuthError) return;
+        const b = $('sheet').querySelector('.sheet-body');
+        if (b) b.innerHTML = stateHtml('Не удалось загрузить настройки', 'Проверьте соединение и попробуйте снова.',
+          '<button type="button" class="btn primary" data-action="settings">Повторить загрузку</button>');
+        return;
+      }
+      setAccess(sub);
+      const body = $('sheet').querySelector('.sheet-body');
+      if (!body || !sheetCfg || sheetCfg.kind !== 'settings') return;
+      const cur = s.currency || S.currency;
+      const amount = Number(s.limit_amount || 0);
+      const shown = cur === 'VND' || cur === 'RUB' ? Math.round(amount) : Math.round(amount * 100) / 100;
+      body.innerHTML = subscriptionCard(sub) +
+        '<div class="settings-group"><h3>Дневной лимит</h3>' +
+          '<label class="switch-row"><span>Следить за лимитом трат</span><input type="checkbox" role="switch" name="limitOn" data-change="limit-toggle"' + (s.limit_enabled ? ' checked' : '') + '></label>' +
+          '<div class="field" id="limitField"' + (s.limit_enabled ? '' : ' hidden') + '><label for="sLimit">Сколько в день, ' + esc(CURRENCY_SIGNS[cur] || cur) + '</label>' +
+            '<input id="sLimit" name="limit" class="amount" type="text" inputmode="decimal" value="' + esc(shown) + '" data-validate="amount" required autocomplete="off">' +
+            '<p class="error" id="sLimit-error" hidden>Введите сумму больше нуля, например 200000</p>' +
+            '<p class="hint">Дни сверх лимита подсвечиваются красным, а в итогах дня бот пишет, сколько осталось.</p></div>' +
+        '</div>' +
+        '<div class="settings-group"><h3 id="sVocabLabel">Слова в Telegram</h3>' +
+          '<div class="radio-chips" role="radiogroup" aria-labelledby="sVocabLabel">' +
+            Object.keys(VOCAB_MODES).map(k => '<label><input type="radio" name="vocab" value="' + k + '"' + (s.vocab_reminders === k ? ' checked' : '') + '><span>' + esc(VOCAB_MODES[k]) + '</span></label>').join('') +
+          '</div>' +
+          '<p class="hint">Бот присылает слово для повторения с 9:00 до 22:00. Раз в день — в 10:00, два раза — в 10:00 и 18:00.</p>' +
+        '</div>' +
+        '<div class="settings-group"><h3>Утренняя сводка</h3>' +
+          '<label class="switch-row"><span>Присылать задачи на сегодня</span><input type="checkbox" role="switch" name="morning"' + (s.morning_summary !== false ? ' checked' : '') + '></label>' +
+          '<p class="hint">Одно сообщение в Telegram утром, после 8:00. В день без задач ничего не приходит.</p>' +
+        '</div>' +
+        '<div class="settings-group"><h3>Долги</h3>' +
+          '<div class="actions" style="display:flex; gap:8px; flex-wrap:wrap">' +
+            '<button type="button" class="btn" data-action="debts">Кто мне должен</button>' +
+            '<button type="button" class="btn" data-action="debts-owe">Кому я должен</button>' +
+          '</div>' +
+          '<p class="hint">Сюда собираются траты с галочкой «Это долг».</p>' +
+        '</div>' +
+        '<div class="settings-group"><h3>Повторяющиеся платежи</h3>' +
+          '<button type="button" class="btn" data-action="recurring">Подписки, аренда, интернет</button>' +
+          '<p class="hint">Платёж и задача сами появляются в нужное число каждого месяца.</p>' +
+        '</div>' +
+        (sub && sub.state === 'owner' ? '' :
+        '<div class="settings-group"><h3>Кнопка на iPhone</h3>' +
+          '<button type="button" class="btn" data-action="shortcut">Подключить</button>' +
+          '<p class="hint">Запись голосом одним нажатием, без открытия приложения.</p>' +
+        '</div>') +
+        '<div class="settings-group"><h3>Условия и данные</h3>' +
+          '<button type="button" class="btn" data-action="terms">Условия и конфиденциальность</button>' +
+          (sub && sub.state === 'owner' ? '' :
+          '<button type="button" class="btn danger-quiet" data-action="delete-me-ask" style="margin-top:8px">Удалить все мои данные</button>') +
+        '</div>';
+      wireValidation($('sheet'));
+      sheetCfg.onSave = async (f) => {
+        const on = f.limitOn.checked;
+        const payload = { limit_enabled: on, currency: cur, vocab_reminders: f.vocab.value || 'daily', morning_summary: f.morning.checked };
+        if (on) payload.limit_amount = parseFloat(String(f.limit.value).replace(/\s/g, '').replace(',', '.'));
+        await api('/api/settings', { method: 'PUT', body: payload });
+        toast('Настройки сохранены');
+        refresh();
+      };
+    }
+
+    // ================= Recurring payments =================
+    async function recurringSheet() {
+      openSheet({ title: 'Повторяющиеся платежи', kind: 'recurring', body: '<div class="skeleton" aria-hidden="true"><div></div><div></div></div>', noFooter: true });
+      let data;
+      try {
+        data = await api('/api/recurring');
+      } catch (e) {
+        if (e instanceof AuthError) return;
+        const b = $('sheet').querySelector('.sheet-body');
+        if (b) b.innerHTML = stateHtml('Не удалось загрузить список', 'Проверьте соединение и попробуйте снова.',
+          '<button type="button" class="btn primary" data-action="recurring">Повторить загрузку</button>');
+        return;
+      }
+      const body = $('sheet').querySelector('.sheet-body');
+      if (!body || !sheetCfg || sheetCfg.kind !== 'recurring') return;
+      S.recurring = {};
+      (data.items || []).forEach(r => { S.recurring[r.id] = r; });
+      const items = data.items || [];
+      const add = '<button type="button" class="btn primary" data-action="new-rec">Добавить платёж</button>';
+      if (!items.length) {
+        body.innerHTML = stateHtml('Пока ничего нет', 'Добавьте подписку, аренду или интернет, и они будут появляться сами в нужное число.', add);
+        return;
+      }
+      body.innerHTML = '<ul class="cards">' + items.map(r => {
+        const what = [r.add_expense ? 'трата' : '', r.add_task ? 'задача' : ''].filter(Boolean).join(' и ');
+        return '<li class="card-item"><button type="button" class="row" data-action="open-rec" data-id="' + r.id + '">' +
+          '<span class="kind k-money">' + icon('wallet') + '</span>' +
+          '<span class="row-main"><span class="row-title">' + esc(r.title) + '</span>' +
+          '<span class="row-meta">' + esc('Каждого ' + r.day_of_month + '-го числа, ' + what) + '</span></span>' +
+          '<span class="row-end"><span class="row-amount">' + (r.add_expense ? esc(money(r.amount, r.currency)) : '') + '</span></span></button></li>';
+      }).join('') + '</ul><div class="actions" style="margin-top:16px">' + add + '</div>';
+    }
+
+    // prefill: values for a new payment made from an existing expense
+    function recurringFormSheet(r, prefill) {
+      const isNew = !r;
+      r = r || Object.assign({ title: '', amount: '', currency: S.currency, category: 'other', day_of_month: Number(todayKey().slice(8, 10)), add_expense: 1, add_task: 0 }, prefill);
+      const cats = Object.keys(CATEGORIES).map(k =>
+        '<label><input type="radio" name="category" value="' + k + '"' + ((CATEGORIES[r.category] ? r.category : 'other') === k ? ' checked' : '') + '><span>' + esc(CATEGORIES[k]) + '</span></label>').join('');
+      openSheet({
+        title: isNew ? 'Новый платёж' : 'Платёж',
+        entity: { kind: 'recurring', id: r.id, name: r.title || 'без названия', noun: 'платёж' },
+        body:
+          '<div class="field"><label for="rTitle">Название</label><input id="rTitle" name="title" type="text" value="' + esc(r.title) + '" data-validate="required" required autocomplete="off">' +
+            '<p class="error" id="rTitle-error" hidden>Введите название, например «Интернет»</p></div>' +
+          '<div class="field"><label for="rDay">Число месяца</label><input id="rDay" name="day" type="number" min="1" max="31" inputmode="numeric" value="' + esc(r.day_of_month) + '" data-validate="required" required>' +
+            '<p class="hint">В коротком месяце сработает в последний день.</p></div>' +
+          '<label class="switch-row"><span>Добавлять трату</span><input type="checkbox" role="switch" name="add_expense" data-change="rec-expense"' + (r.add_expense ? ' checked' : '') + '></label>' +
+          '<div id="recExpenseFields"' + (r.add_expense ? '' : ' hidden') + '>' +
+            '<div class="row2" style="grid-template-columns: 2fr 1fr;">' +
+              '<div class="field"><label for="rAmount">Сумма</label><input id="rAmount" name="amount" class="amount" type="text" inputmode="decimal" value="' + esc(r.amount || '') + '" data-validate="amount">' +
+                '<p class="error" id="rAmount-error" hidden>Введите сумму больше нуля, например 150000</p></div>' +
+              '<div class="field"><label for="rCur">Валюта</label><select id="rCur" name="currency">' +
+                ['VND', 'USD', 'RUB', 'AED'].map(c => '<option' + (c === (r.currency || 'VND') ? ' selected' : '') + '>' + c + '</option>').join('') +
+              '</select></div>' +
+            '</div>' +
+            '<div class="field"><span class="label" id="rCatLabel">Категория</span><div class="radio-chips" role="radiogroup" aria-labelledby="rCatLabel">' + cats + '</div></div>' +
+            '<p class="hint">Такая трата не считается в дневной лимит.</p>' +
+          '</div>' +
+          '<label class="switch-row"><span>Добавлять задачу на этот день</span><input type="checkbox" role="switch" name="add_task"' + (r.add_task ? ' checked' : '') + '></label>',
+        primary: isNew ? 'Добавить платёж' : 'Сохранить платёж',
+        canDelete: !isNew,
+        onSave: async (f) => {
+          const body = {
+            title: f.title.value.trim(), day_of_month: parseInt(f.day.value, 10), add_expense: f.add_expense.checked, add_task: f.add_task.checked,
+            amount: parseFloat(String(f.amount.value).replace(/\s/g, '').replace(',', '.')) || null,
+            currency: f.currency.value, category: f.category.value
+          };
+          if (isNew) await api('/api/recurring', { method: 'POST', body });
+          else await api('/api/recurring/' + r.id, { method: 'PATCH', body });
+          toast(isNew ? 'Платёж добавлен' : 'Платёж сохранён');
+          setTimeout(recurringSheet, 220);
+        },
+        onDelete: async () => {
+          await api('/api/recurring/' + r.id, { method: 'DELETE' });
+          toast('Платёж удалён');
+          setTimeout(recurringSheet, 220);
+        }
+      });
+    }
+
+    function wordSheet(w) {
+      const isNew = !w;
+      w = w || { word: '', translation: '', phonetic: '', example: '' };
+      openSheet({
+        title: isNew ? 'Новое слово' : 'Слово',
+        entity: { kind: 'word', id: w.id, name: w.word, noun: 'слово' },
+        body:
+          '<div class="field"><label for="wWord">Слово или фраза</label><input id="wWord" name="word" type="text" lang="en" value="' + esc(w.word) + '" data-validate="required" required autocomplete="off" autocapitalize="off">' +
+            '<p class="error" id="wWord-error" hidden>Введите слово, например resilient</p></div>' +
+          '<div class="field"><label for="wTrans">Перевод</label><input id="wTrans" name="translation" type="text" value="' + esc(w.translation) + '" data-validate="required" required autocomplete="off">' +
+            '<p class="error" id="wTrans-error" hidden>Введите перевод, например «стойкий»</p></div>' +
+          '<div class="field"><label for="wPhon">Произношение</label><input id="wPhon" name="phonetic" type="text" value="' + esc(w.phonetic) + '" autocomplete="off"><p class="hint">Необязательно, например [рези́лиент]</p></div>' +
+          '<div class="field"><label for="wEx">Пример</label><input id="wEx" name="example" type="text" lang="en" value="' + esc(w.example) + '" autocomplete="off"></div>',
+        primary: isNew ? 'Добавить слово' : 'Сохранить слово',
+        canDelete: !isNew,
+        onSave: async (f) => {
+          const body = { word: f.word.value.trim(), translation: f.translation.value.trim(), phonetic: f.phonetic.value.trim(), example: f.example.value.trim() };
+          await api(isNew ? '/api/vocabulary' : '/api/vocabulary/' + w.id, { method: isNew ? 'POST' : 'PUT', body });
+          toast(isNew ? 'Слово добавлено' : 'Слово сохранено');
+          refresh();
+        },
+        onDelete: async () => {
+          await api('/api/vocabulary/' + w.id, { method: 'DELETE' });
+          toast('Слово удалено');
+          refresh();
+        }
+      });
+    }
+
+    // ================= Review queue =================
+    async function loadReview() {
+      try {
+        const data = await api('/api/review');
+        S.review = data.items || [];
+      } catch (e) {
+        S.review = [];
+      }
+      renderReviewBanner();
+      if (S.view === 'day' && S.day) renderSections(dayKey());
+      if ($('sheet').open && $('sheet').dataset.kind === 'review') renderReviewSheet();
+      tryPendingOpen();
+    }
+
+    function renderReviewBanner() {
+      // On the day view entries of that day are reviewed inline; the banner covers the rest
+      const shownInline = S.view === 'day' ? dayReviewItems(dayKey()).length : 0;
+      const n = S.review.length - shownInline;
+      document.querySelectorAll('.review-banner').forEach(b => {
+        b.hidden = n <= 0;
+        b.innerHTML = '<span class="kind k-warn">' + icon('alert') + '</span><span class="grow">' +
+          (shownInline ? 'Ещё ' + n + ' ' + plural(n, 'запись ждёт', 'записи ждут', 'записей ждут') + ' проверки'
+                       : n + ' ' + plural(n, 'запись ждёт', 'записи ждут', 'записей ждут') + ' проверки') +
+          '</span>' + icon('right');
+      });
+    }
+
+    function reviewEntryHtml(item) {
+      const dup = !!item.possible_duplicate;
+      const kind = KIND_NAMES[item.entity_type] || 'Запись';
+      const ts = parseTs(item.created_at);
+      const title = item.title || item.raw_text || '';
+      const canMerge = dup && ['notes', 'tasks'].includes(item.entity_type) && item.duplicate_of;
+      const key = item.entity_type + ':' + item.id;
+      let why;
+      if (dup) {
+        const ot = item.original_record && parseTs(item.original_record.created_at);
+        why = 'похоже на повтор' + (ot ? ' записи в ' + timeOf(ot) : '');
+      } else {
+        why = 'не уверен, что понял верно';
+      }
+      return '<div class="review-entry" data-key="' + esc(key) + '">' +
+        '<span class="kind k-warn">' + icon('alert') + '</span>' +
+        '<div class="row-main">' +
+          '<div class="head"><span class="row-title">' + esc(title || kind) + '</span>' +
+            (item.amount ? '<span class="row-amount">' + esc(money(item.amount, item.currency || 'VND')) + '</span>' : '') + '</div>' +
+          '<span class="note">' + esc((ts ? timeOf(ts) + ', ' : '') + kind.toLowerCase() + ', ' + why) + '</span>' +
+          (item.content ? '<span class="row-sub">' + esc(item.content) + '</span>' : '') +
+          (item.raw_transcript ? '<span class="row-meta">«' + esc(item.raw_transcript) + '»</span>' : '') +
+          '<div class="review-actions">' +
+            (canMerge ? '<button type="button" class="btn small primary" data-action="review-merge" data-key="' + esc(key) + '">Объединить</button>' : '') +
+            '<button type="button" class="btn small ' + (canMerge ? '' : 'primary') + '" data-action="review-confirm" data-key="' + esc(key) + '">' + (dup ? 'Оставить обе' : 'Подтвердить') + '</button>' +
+            (dup ? '' : '<button type="button" class="btn small" data-action="review-edit" data-key="' + esc(key) + '">Исправить</button>') +
+            '<button type="button" class="btn small danger-quiet" data-action="review-reject" data-key="' + esc(key) + '">' + (dup ? 'Удалить повтор' : 'Удалить') + '</button>' +
+          '</div>' +
+        '</div></div>';
+    }
+
+    function renderReviewSheet() {
+      const body = $('sheet').querySelector('.sheet-body');
+      if (!body) return;
+      const list = S.view === 'day' ? S.review.filter(i => !dayReviewItems(dayKey()).includes(i)) : S.review;
+      body.innerHTML = list.length
+        ? '<ul class="cards">' + list.map(i => '<li class="card-item review">' + reviewEntryHtml(i) + '</li>').join('') + '</ul>'
+        : stateHtml('Всё проверено', 'Когда TRACE не уверен в записи или видит повтор, она появится здесь.');
+    }
+
+    function openReview() {
+      openSheet({ title: 'Проверка записей', kind: 'review', body: '', noFooter: true });
+      renderReviewSheet();
+    }
+
+    function findReview(key) {
+      const [type, id] = key.split(':');
+      return S.review.find(i => i.entity_type === type && String(i.id) === id);
+    }
+
+    async function reviewAct(action, key, btn) {
+      const item = findReview(key);
+      if (!item) return;
+      if (action === 'reject' && !btn.dataset.armed) {
+        // Inline named confirmation instead of a second dialog
+        const actions = btn.closest('.review-actions');
+        const name = item.title || item.raw_text || KIND_NAMES[item.entity_type];
+        const noun = { finances: 'расход', tasks: 'задачу', notes: 'заметку' }[item.entity_type] || 'запись';
+        actions.innerHTML = '<p class="confirm-text">Удалить ' + noun + ' «' + esc(name) + '»?</p>' +
+          '<button type="button" class="btn small" data-action="review-cancel">Отмена</button>' +
+          '<button type="button" class="btn small danger" data-action="review-reject" data-key="' + esc(key) + '" data-armed="1">Удалить запись</button>';
+        actions.querySelector('[data-action="review-cancel"]').focus();
+        return;
+      }
+      btn.setAttribute('aria-busy', 'true');
+      const body = { table: item.entity_type, id: item.id };
+      if (action === 'merge') body.target_id = item.duplicate_of;
+      try {
+        await api('/api/review/' + action, { method: 'POST', body });
+        haptic(action === 'reject' ? 'warning' : 'success');
+        toast(action === 'merge' ? 'Записи объединены' : action === 'reject' ? 'Запись удалена' : 'Запись сохранена');
+        S.review = S.review.filter(i => i !== item);
+        renderReviewBanner();
+        if ($('sheet').open && $('sheet').dataset.kind === 'review') renderReviewSheet();
+        loadView();
+      } catch (e) {
+        btn.removeAttribute('aria-busy');
+        if (!(e instanceof AuthError)) failToast('выполнить действие', () => reviewAct(action, key, btn));
+      }
+    }
+
+    // ================= Sheet (single dialog, never stacked) =================
+    let sheetCfg = null;
+    let sheetTrigger = null;
+
+    function openSheet(cfg) {
+      const dlg = $('sheet');
+      sheetCfg = cfg;
+      if (!dlg.open) sheetTrigger = document.activeElement;
+      dlg.dataset.kind = cfg.kind || (cfg.entity && cfg.entity.kind) || '';
+      dlg.innerHTML =
+        '<form method="dialog" id="sheetForm" novalidate style="display:contents">' +
+          '<div class="sheet-head"><h2 id="sheetTitle">' + esc(cfg.title) + '</h2>' +
+            '<button type="button" class="icon-btn" data-action="close-sheet" title="Закрыть" aria-label="Закрыть">' + icon('close') + '</button></div>' +
+          '<div class="sheet-body">' + cfg.body + '</div>' +
+          (cfg.noFooter ? '' :
+            '<div class="sheet-foot" id="sheetFoot">' +
+              (cfg.canDelete ? '<button type="button" class="btn danger-quiet" data-action="ask-delete">Удалить</button>' : '') +
+              '<span class="spacer"></span>' +
+              '<button type="submit" class="btn primary" id="sheetSave">' + esc(cfg.primary) + '</button>' +
+            '</div>') +
+        '</form>';
+      dlg.classList.remove('closing');
+      if (!dlg.open) dlg.showModal();
+      const first = dlg.querySelector('.sheet-body input:not([readonly]):not([type=radio]), .sheet-body textarea');
+      if (first && cfg.entity && !cfg.entity.id) setTimeout(() => first.focus(), 50);
+      else dlg.querySelector('[data-action="close-sheet"]').focus();
+      if (tg && tg.BackButton) { try { tg.BackButton.show(); } catch (e) {} }
+      wireValidation(dlg);
+    }
+
+    function closeSheet() {
+      const dlg = $('sheet');
+      if (!dlg.open) return;
+      const done = () => {
+        dlg.classList.remove('closing');
+        if (dlg.open) dlg.close();
+        dlg.innerHTML = '';
+        sheetCfg = null;
+        if (tg && tg.BackButton) { try { tg.BackButton.hide(); } catch (e) {} }
+        restoreFocus(sheetTrigger);
+        sheetTrigger = null;
+      };
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return done();
+      dlg.classList.add('closing');
+      setTimeout(done, 150);
+    }
+
+    // Lists re-render while a sheet is open, so the trigger may be gone: find its replacement
+    function restoreFocus(el) {
+      if (!el) return;
+      if (document.contains(el)) { el.focus(); return; }
+      const d = el.dataset || {};
+      let sel = d.action ? '[data-action="' + d.action + '"]' : '';
+      if (sel && d.kind) sel += '[data-kind="' + d.kind + '"]';
+      if (sel && d.id) sel += '[data-id="' + d.id + '"]';
+      if (sel && d.value) sel += '[data-value="' + d.value + '"]';
+      const twin = sel && document.querySelector('main:not([hidden]) ' + sel);
+      if (twin) twin.focus();
+    }
+
+    function askDelete() {
+      const e = sheetCfg.entity;
+      const foot = $('sheetFoot');
+      foot.classList.add('confirming');
+      foot.innerHTML = '<p class="confirm-text">Удалить ' + esc(e.noun) + ' «' + esc(e.name) + '»? Это нельзя отменить.</p>' +
+        '<span class="spacer"></span>' +
+        '<button type="button" class="btn" data-action="cancel-delete">Отмена</button>' +
+        '<button type="button" class="btn danger" data-action="confirm-delete">Удалить ' + esc(e.noun) + '</button>';
+      foot.querySelector('[data-action="cancel-delete"]').focus();
+      haptic('warning');
+    }
+
+    function cancelDelete() {
+      const foot = $('sheetFoot');
+      foot.classList.remove('confirming');
+      foot.innerHTML = '<button type="button" class="btn danger-quiet" data-action="ask-delete">Удалить</button><span class="spacer"></span>' +
+        '<button type="submit" class="btn primary" id="sheetSave">' + esc(sheetCfg.primary) + '</button>';
+      foot.querySelector('[data-action="ask-delete"]').focus();
+    }
+
+    async function confirmDelete(btn) {
+      btn.setAttribute('aria-busy', 'true');
+      try {
+        await sheetCfg.onDelete();
+        haptic('warning');
+        closeSheet();
+      } catch (e) {
+        btn.removeAttribute('aria-busy');
+        if (!(e instanceof AuthError)) failToast('удалить', () => confirmDelete(btn));
+      }
+    }
+
+    // Blur-first validation: errors appear after leaving a field, clear on focus/typing
+    function validateField(input) {
+      const rule = input.dataset.validate;
+      if (!rule) return true;
+      const v = input.value.trim();
+      let ok = true;
+      if (rule === 'required') ok = v.length > 0;
+      if (rule === 'amount') { const n = parseFloat(v.replace(/\s/g, '').replace(',', '.')); ok = Number.isFinite(n) && n > 0; }
+      const err = $(input.id + '-error');
+      if (err) err.hidden = ok;
+      if (ok) input.removeAttribute('aria-invalid');
+      else { input.setAttribute('aria-invalid', 'true'); input.setAttribute('aria-describedby', input.id + '-error'); }
+      return ok;
+    }
+    function clearFieldError(input) {
+      input.removeAttribute('aria-invalid');
+      const err = $(input.id + '-error');
+      if (err) err.hidden = true;
+    }
+    function wireValidation(root) {
+      root.querySelectorAll('[data-validate]').forEach(inp => {
+        inp.addEventListener('blur', () => validateField(inp));
+        inp.addEventListener('focus', () => clearFieldError(inp));
+        inp.addEventListener('input', () => clearFieldError(inp));
+      });
+    }
+
+    async function submitSheet(form) {
+      const fields = [...form.querySelectorAll('[data-validate]')].filter(f => !f.closest('[hidden]'));
+      const bad = fields.filter(f => !validateField(f));
+      if (bad.length) {
+        bad[0].focus();
+        validateField(bad[0]);
+        bad[0].scrollIntoView({ block: 'center' });
+        haptic('error');
+        return;
+      }
+      const btn = $('sheetSave');
+      btn.setAttribute('aria-busy', 'true');
+      try {
+        await sheetCfg.onSave(form.elements);
+        haptic('success');
+        closeSheet();
+      } catch (e) {
+        btn.removeAttribute('aria-busy');
+        if (!(e instanceof AuthError)) {
+          haptic('error');
+          // 409 carries a reason the user can act on (e.g. the word is already in the dictionary)
+          toast(e.detail && e.detail.status === 409 && e.detail.error ? e.detail.error + '.' : 'Не удалось сохранить, данные остались в форме. Проверьте соединение и нажмите ещё раз.');
+        }
+      }
+    }
+
+    // ================= Capture (text + voice) =================
+    const captureInput = $('captureInput');
+    let recorder = null, recChunks = [], recTimer = null, recStart = 0;
+    const canRecord = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
+
+    function syncCaptureButtons() {
+      const hasText = captureInput.value.trim().length > 0;
+      const recording = !!recorder;
+      $('sendBtn').hidden = !(hasText || !canRecord) || recording;
+      $('micBtn').hidden = !canRecord || (hasText && !recording);
+    }
+    function autoGrow() {
+      captureInput.style.height = '48px';
+      captureInput.style.height = Math.min(captureInput.scrollHeight, 120) + 'px';
+      captureInput.classList.toggle('scroll', captureInput.scrollHeight > 120);
+    }
+
+    async function sendCapture(payload, label) {
+      const btn = recorder ? $('micBtn') : $('sendBtn');
+      btn.setAttribute('aria-busy', 'true');
+      toast(label);
+      // Captured while a past day is open: expenses go to that day and the screen stays on it
+      const day = captureDay();
+      if (day) payload = Object.assign({}, payload, { date: day });
+      try {
+        const res = await api('/api/capture', { method: 'POST', body: payload });
+        haptic('success');
+        toast(res.screen_notification || 'Записано');
+        if (!day) S.date = null;
+        return true;
+      } catch (e) {
+        if (!(e instanceof AuthError)) {
+          haptic('error');
+          toast('Запись не сохранилась. Текст остался в поле, попробуйте ещё раз.', e.detail ? { label: 'Скопировать детали', run: () => copyText(JSON.stringify(e.detail)) } : null);
+        }
+        return false;
+      } finally {
+        btn.removeAttribute('aria-busy');
+        refresh();
+      }
+    }
+
+    async function submitCapture() {
+      const text = captureInput.value.trim();
+      if (!text) { captureInput.focus(); return; }
+      const ok = await sendCapture({ text }, 'Разбираю запись…');
+      if (ok) { captureInput.value = ''; autoGrow(); syncCaptureButtons(); }
+    }
+
+    async function toggleRecording() {
+      if (recorder) { recorder.stop(); return; }
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (e) {
+        toast('Нет доступа к микрофону. Разрешите его в настройках или напишите текстом.');
+        return;
+      }
+      const type = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg'].find(t => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) || '';
+      recorder = type ? new MediaRecorder(stream, { mimeType: type }) : new MediaRecorder(stream);
+      recChunks = [];
+      recorder.ondataavailable = (ev) => { if (ev.data && ev.data.size) recChunks.push(ev.data); };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        clearInterval(recTimer);
+        const mime = (recorder.mimeType || type || 'audio/webm').split(';')[0];
+        const blob = new Blob(recChunks, { type: mime });
+        setRecordingUi(false);
+        if (blob.size < 1500) { recorder = null; syncCaptureButtons(); toast('Запись слишком короткая. Говорите чуть дольше.'); return; }
+        const b64 = await blobToBase64(blob);
+        await sendCapture({ audio: b64, mime_type: mime }, 'Распознаю голос…');
+        recorder = null;
+        syncCaptureButtons();
+      };
+      recorder.start();
+      haptic('medium');
+      setRecordingUi(true);
+    }
+    function setRecordingUi(on) {
+      const mic = $('micBtn');
+      mic.classList.toggle('rec', on);
+      mic.innerHTML = icon(on ? 'stop' : 'mic');
+      mic.setAttribute('aria-label', on ? 'Остановить и отправить' : 'Записать голосом');
+      mic.title = mic.getAttribute('aria-label');
+      captureInput.hidden = on;
+      $('recTime').hidden = !on;
+      $('sendBtn').hidden = true;
+      if (on) {
+        recStart = Date.now();
+        $('recTime').textContent = '0:00';
+        recTimer = setInterval(() => {
+          const s = Math.floor((Date.now() - recStart) / 1000);
+          $('recTime').textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+        }, 500);
+      }
+    }
+    function blobToBase64(blob) {
+      return new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result).replace(/^data:[^;]+;base64,/, ''));
+        r.onerror = reject;
+        r.readAsDataURL(blob);
+      });
+    }
+    async function copyText(text) {
+      try { await navigator.clipboard.writeText(text); toast('Скопировано'); }
+      catch (e) { toast('Не удалось скопировать. Выделите текст вручную.'); }
+    }
+
+    // ================= Access: dim the "create" buttons when there is no subscription =================
+    const CREATE_ACTIONS = new Set(['new-task', 'new-note', 'new-word', 'new-rec', 'mic']);
+    const accessLocked = () => document.body.classList.contains('no-access');
+    function noAccessToast() {
+      haptic('error');
+      toast('Добавлять записи можно после оформления подписки.', { label: 'Подписка', run: settingsSheet });
+    }
+    function setAccess(sub) {
+      const locked = !!sub && (sub.state === 'new' || sub.state === 'expired');
+      document.body.classList.toggle('no-access', locked);
+      document.querySelectorAll('[data-action="new-task"], [data-action="new-note"], [data-action="new-word"], [data-action="mic"], #sendBtn')
+        .forEach(el => locked ? el.setAttribute('aria-disabled', 'true') : el.removeAttribute('aria-disabled'));
+    }
+    async function loadAccess() {
+      try { setAccess(await api('/api/subscription')); } catch (e) {}
+    }
+
+    // ================= Events =================
+    const OPENERS = { finance: financeSheet, task: taskSheet, note: noteSheet, word: wordSheet };
+
+    document.addEventListener('click', (ev) => {
+      const el = ev.target.closest('[data-action]');
+      if (!el) return;
+      const a = el.dataset.action;
+      const id = el.dataset.id ? Number(el.dataset.id) : null;
+      const v = el.dataset.value;
+      if (CREATE_ACTIONS.has(a) && accessLocked()) { noAccessToast(); return; }
+      switch (a) {
+        case 'tab': haptic('select'); setView(v); break;
+        case 'day-prev': haptic('select'); S.date = shiftKey(dayKey(), -1); loadDay(); break;
+        case 'day-next': {
+          haptic('select');
+          const next = shiftKey(dayKey(), 1);
+          S.date = next >= todayKey() ? null : next;
+          loadDay();
+          break;
+        }
+        case 'pick-date': {
+          const p = $('dayPicker');
+          p.value = dayKey();
+          p.max = todayKey();
+          try { p.showPicker ? p.showPicker() : p.click(); } catch (e) { p.click(); }
+          break;
+        }
+        case 'period': periodSheet(v); break;
+        case 'reload-day': loadDay(); break;
+        case 'focus-capture': captureInput.focus(); break;
+        case 'open': {
+          const item = S.idx[el.dataset.kind] && S.idx[el.dataset.kind][id];
+          if (item) OPENERS[el.dataset.kind](item);
+          break;
+        }
+        case 'task-filter': haptic('select'); S.taskFilter = v; setPressed('[data-action="task-filter"]', v); loadTasks(); break;
+        case 'reload-tasks': loadTasks(); break;
+        case 'new-task': taskSheet(null); break;
+        case 'toggle-task': toggleTask(id, el); break;
+        case 'clear-note-search': S.noteQuery = ''; $('notesSearch').value = ''; loadNotes(); break;
+        case 'pick-day': haptic('select'); S.date = v === todayKey() ? null : v; loadDay(); break;
+        case 'reload-notes': loadNotes(); break;
+        case 'new-note': noteSheet(null); break;
+        case 'reveal-note': {
+          S.revealed.add(id); haptic('light');
+          const n = S.idx.note[id];
+          el.closest('.field').remove();
+          $('nContent').closest('.field').hidden = false;
+          if (n) $('nContent').value = n.content || '';
+          break;
+        }
+        case 'copy-note': copyText($('nContent').value); break;
+        case 'word-mode': haptic('select'); S.wordMode = v; S.cardFlipped = false; savePrefs(); setPressed('[data-action="word-mode"]', v); loadWords(); break;
+        case 'top-home': haptic('light'); T.screen = 'groups'; renderTop(); break;
+        case 'top-locked': haptic('warning'); toast('Сначала решите группу ' + (id - 1) + ' ' + TOP_NEED + ' раза без ошибок'); break;
+        case 'top-group': if (!topUnlocked(id)) break; haptic('light'); T.screen = 'group'; T.group = id; renderTop(); break;
+        case 'top-study': if (!topUnlocked(id)) break; haptic('light'); T.screen = 'study'; T.group = id; T.idx = 0; T.flipped = false; renderTop(); break;
+        case 'top-flip': haptic('light'); T.flipped = true; renderTop(); break;
+        case 'top-prev': haptic('light'); if (T.idx > 0) { T.idx--; T.flipped = false; renderTop(); } break;
+        case 'top-next': topNextCard(); break;
+        case 'top-test': topStartTest(id); break;
+        case 'top-answer': topAnswer(id); break;
+        case 'top-after': topAfterAnswer(); break;
+        case 'reload-words': loadWords(); break;
+        case 'new-word': wordSheet(null); break;
+        case 'debts': debtsSheet(false); break;
+        case 'debts-owe': debtsSheet(true); break;
+        case 'open-debt': if (S.debts && S.debts[id]) debtPaySheet(S.debts[id]); break;
+        case 'debt-pay': payDebtAction(id, false); break;
+        case 'debt-pay-all': payDebtAction(id, true); break;
+        case 'flip': haptic('light'); S.cardFlipped = true; renderWords(); break;
+        case 'card-next': haptic('light'); S.cardIdx = (S.cardIdx + 1) % S.words.length; S.cardFlipped = false; renderWords(); break;
+        case 'card-prev': haptic('light'); S.cardIdx = (S.cardIdx - 1 + S.words.length) % S.words.length; S.cardFlipped = false; renderWords(); break;
+        case 'open-review': openReview(); break;
+        case 'review-confirm': reviewAct('confirm', el.dataset.key, el); break;
+        case 'settings': settingsSheet(); break;
+        case 'shortcut': shortcutSheet(); break;
+        case 'terms': termsSheet(); break;
+        case 'delete-me-ask': deleteMeSheet(); break;
+        case 'delete-me-confirm': deleteMeAction(el); break;
+        case 'token-issue': issueTokenAction(el); break;
+        case 'token-copy': copyToken(); break;
+        case 'sub-trial': subTrial(el); break;
+        case 'sub-buy': subBuy(el); break;
+        case 'recurring': recurringSheet(); break;
+        case 'new-rec': recurringFormSheet(null); break;
+        case 'make-rec': {
+          const t = S.idx.finance[id];
+          if (!t) break;
+          const ts = parseTs(t.created_at);
+          recurringFormSheet(null, {
+            title: t.title || '', amount: t.original_amount !== undefined ? t.original_amount : t.amount,
+            currency: t.original_currency || t.currency, category: t.category,
+            day_of_month: ts ? Number(localKey(ts).slice(8, 10)) : Number(todayKey().slice(8, 10))
+          });
+          break;
+        }
+        case 'open-rec': if (S.recurring && S.recurring[id]) recurringFormSheet(S.recurring[id]); break;
+        case 'review-edit': {
+          // Saving the edited record also confirms it (the server clears the review flags on edit)
+          const item = findReview(el.dataset.key);
+          const kind = item && { finances: 'finance', tasks: 'task', notes: 'note' }[item.entity_type];
+          if (kind) OPENERS[kind](item);
+          break;
+        }
+        case 'review-merge': reviewAct('merge', el.dataset.key, el); break;
+        case 'review-reject': reviewAct('reject', el.dataset.key, el); break;
+        case 'review-cancel':
+          if ($('sheet').open && $('sheet').dataset.kind === 'review') renderReviewSheet();
+          else renderSections(dayKey());
+          break;
+        case 'close-sheet': closeSheet(); break;
+        case 'ask-delete': askDelete(); break;
+        case 'cancel-delete': cancelDelete(); break;
+        case 'confirm-delete': confirmDelete(el); break;
+        case 'mic': toggleRecording(); break;
+      }
+    });
+
+    document.addEventListener('change', (ev) => {
+      const k = ev.target.dataset && ev.target.dataset.change;
+      if (k === 'currency') { S.currency = ev.target.value; savePrefs(); haptic('select'); loadDay(); }
+      if (k === 'limit-toggle') {
+        haptic('select');
+        const field = $('limitField');
+        if (field) {
+          field.hidden = !ev.target.checked;
+          if (ev.target.checked) $('sLimit').focus();
+        }
+      }
+      if (k === 'rec-expense') {
+        const field = $('recExpenseFields');
+        if (field) field.hidden = !ev.target.checked;
+      }
+      if (k === 'date' && ev.target.value) {
+        const v = ev.target.value > todayKey() ? todayKey() : ev.target.value;
+        S.date = v === todayKey() ? null : v;
+        loadDay();
+      }
+    });
+
+    document.addEventListener('input', (ev) => {
+      if (ev.target.dataset && ev.target.dataset.input === 'notes-search') {
+        clearTimeout(noteSearchTimer);
+        noteSearchTimer = setTimeout(() => { S.noteQuery = ev.target.value.trim(); loadNotes(); }, 250);
+      }
+    });
+
+    $('sheet').addEventListener('submit', (ev) => { ev.preventDefault(); submitSheet(ev.target); });
+    $('sheet').addEventListener('cancel', (ev) => { ev.preventDefault(); closeSheet(); });
+    $('sheet').addEventListener('click', (ev) => { if (ev.target === $('sheet')) closeSheet(); });
+    if (tg && tg.BackButton) { try { tg.BackButton.onClick(closeSheet); } catch (e) {} }
+
+    $('captureForm').addEventListener('submit', (ev) => { ev.preventDefault(); if (accessLocked()) { noAccessToast(); return; } submitCapture(); });
+    captureInput.addEventListener('input', () => { autoGrow(); syncCaptureButtons(); });
+    captureInput.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing) { ev.preventDefault(); submitCapture(); }
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') { refresh(); loadAccess(); }
+    });
+
+    // ================= Boot =================
+    async function boot() {
+      loadPrefs();
+      await loadProfile();
+      loadAccess();
+      applyTheme();
+      $('currencySel').value = S.currency;
+      setPressed('[data-action="word-mode"]', S.wordMode);
+      syncCaptureButtons();
+      // Telegram "Исправить" links here as ?open=finance:45: open that record once the day has loaded
+      const open = new URLSearchParams(location.search).get('open');
+      if (open && /^(finance|task|note|word):\d+$/.test(open)) {
+        const [kind, id] = open.split(':');
+        S.pendingOpen = { kind, id };
+        S.view = 'day';
+        try { history.replaceState(null, '', location.pathname); } catch (e) {}
+      }
+      loadReview();
+      setView(S.view);
+      if (S.profile && !S.profile.setup_done) firstRunSheet(S.profile);
+      const splash = $('splash');
+      setTimeout(() => {
+        splash.classList.add('out');
+        setTimeout(() => splash.remove(), 350);
+      }, 900);
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+    else boot();
+  </script>
+</body>
+</html>
