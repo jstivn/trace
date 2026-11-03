@@ -795,6 +795,65 @@ async function startTrial(env) {
 const trialStartedText = (r, env) =>
   `<i>Пробный период начался</i>\n<blockquote>До <b>${ruDate(r.until, env.tzMs)}</b>, до ${r.daily} записей в день. Просто скажите или напишите: «кофе 50к».</blockquote>`;
 
+// ---------- First meeting: what /start says, and the bot's public profile (shown before the first message) ----------
+const BOT_EXAMPLES = '<pre>кофе 85 тысяч\nзавтра в 9 позвонить маме\nзаметка: размер шин 205/55</pre>';
+
+/** /start text and buttons by the person's state: a newcomer gets what the bot does and the trial offer, others a short hint. */
+async function welcomeCard(env) {
+  const state = subscriptionState(env.user);
+  if (state === 'owner' || state === 'trial' || state === 'active') {
+    return { text: '<b>TRACE</b>\n\nСкажите голосом или напишите, я запишу:\n' + BOT_EXAMPLES + '<i>Всё записанное видно в приложении. Подсказка по командам: /help</i>', rows: [] };
+  }
+  const offer = await accessOffer(env);
+  if (state === 'expired') {
+    return { text: '<b>TRACE</b>\n\n' + escapeHtml(offer.line) + '\n\n<i>Уже сделанные записи можно смотреть в приложении.</i>', rows: offer.rows };
+  }
+  const intro = '<b>Привет! Я TRACE.</b>\n\nГоворите или пишите как есть, а я запишу:\n' + BOT_EXAMPLES +
+    'Получится трата, задача с напоминанием и заметка. Всё видно в приложении: траты, задачи, заметки и 1000 английских слов с примерами.\n\n';
+  const limits = await subscriptionLimits(env);
+  if (!env.user.trial_used && limits.trialDays > 0) {
+    const plan = await subscriptionPlan(env);
+    return {
+      text: intro + `<i>Попробуйте бесплатно: ${limits.trialDays} ${ruDays(limits.trialDays)}, до ${limits.trialDaily} записей в день. Потом ${plan.priceStars} Stars на ${plan.days} ${ruDays(plan.days)}.</i>`,
+      rows: offer.rows
+    };
+  }
+  return { text: intro + `<i>${escapeHtml(offer.line)}</i>`, rows: offer.rows };
+}
+
+const BOT_COMMANDS = [
+  { command: 'app', description: 'Открыть приложение' },
+  { command: 'status', description: 'Моя подписка' },
+  { command: 'subscribe', description: 'Оформить подписку' },
+  { command: 'help', description: 'Как пользоваться' },
+  { command: 'token', description: 'Кнопка на iPhone' },
+  { command: 'terms', description: 'Условия и данные' }
+];
+const BOT_SHORT_DESCRIPTION = 'Голосовой помощник: траты, задачи, заметки и английские слова';
+
+async function botDescription(env) {
+  const limits = await subscriptionLimits(env);
+  return 'TRACE это личный помощник, который слушает и раскладывает всё по полочкам. Скажите или напишите фразу, и он запишет трату, поставит напоминание или сохранит заметку. ' +
+    'Есть учёт расходов, задачи, заметки и 1000 английских слов с примерами.' +
+    (limits.trialDays > 0 ? ` Первые ${limits.trialDays} ${ruDays(limits.trialDays)} бесплатно.` : '');
+}
+
+/** Sets the profile Telegram shows before /start: description, short description, command menu and the app button next to the input. */
+async function setBotProfile(env, appUrl) {
+  const calls = [
+    ['setMyCommands', { commands: BOT_COMMANDS }],
+    ['setMyDescription', { description: await botDescription(env) }],
+    ['setMyShortDescription', { short_description: BOT_SHORT_DESCRIPTION }],
+    ['setChatMenuButton', { menu_button: { type: 'web_app', text: 'Открыть', web_app: { url: appUrl } } }]
+  ];
+  const out = {};
+  for (const [method, payload] of calls) {
+    const res = await telegramCall(env, method, payload);
+    out[method] = res?.ok ? 'ok' : (res?.description || 'failed');
+  }
+  return out;
+}
+
 /**
  * Subscriptions that ran out: mark them expired and say so once, in the person's daytime
  * (until then they are already view-only; the status is derived from the date).
@@ -1032,7 +1091,7 @@ export default {
       // From here on `env` belongs to ONE user (env.uid); every query below is filtered by it.
       let authKind = null;
       // /api/set-webhook is opened by the webhook secret itself (X-Setup-Key) or by the owner's usual login
-      const setupKeyOk = url.pathname === '/api/set-webhook' && !!env.TELEGRAM_WEBHOOK_SECRET &&
+      const setupKeyOk = (url.pathname === '/api/set-webhook' || url.pathname === '/api/set-bot-profile') && !!env.TELEGRAM_WEBHOOK_SECRET &&
         safeEqual(request.headers.get('X-Setup-Key'), env.TELEGRAM_WEBHOOK_SECRET);
       if (setupKeyOk) {
         env = await userEnv(env, OWNER);
@@ -1077,6 +1136,12 @@ export default {
           drop_pending_updates: false
         });
         return jsonResponse({ ok: !!res?.ok, description: res?.description || null });
+      }
+
+      // The bot's public profile (description, commands menu, app button). Owner only; run once after a change of the texts.
+      if (url.pathname === '/api/set-bot-profile' && method === 'POST') {
+        if (env.uid !== OWNER_ID) return errorResponse('Forbidden', 403);
+        return jsonResponse({ ok: true, results: await setBotProfile(env, `${url.origin}/app`) });
       }
 
       if (url.pathname === '/api/sync-user' && method === 'POST') {
@@ -3565,17 +3630,11 @@ async function processTelegramUpdate(update, env, url) {
 
   // Commands /start or /app
   if (text.startsWith('/start') || text.startsWith('/app')) {
-    const offer = await accessOffer(env);
-    const welcomeText = `<b>TRACE Copilot</b> подключен к вашему аккаунту.\n\n` +
-      `Голосовой ассистент, учет финансов, задачи, банк памяти и английский словарь.\n\n` +
-      `<i>Напоминания по задачам будут приходить сюда по расписанию.</i>\n\n` +
-      (offer.line ? `<i>${escapeHtml(offer.line)} Уже сделанные записи можно смотреть в приложении.</i>\n\n` : '') +
-      `Нажмите кнопку ниже, чтобы открыть приложение:`;
-
-    await sendTelegramMessage(token, chatId, welcomeText, {
+    const welcome = await welcomeCard(env);
+    await sendTelegramMessage(token, chatId, welcome.text, {
       inline_keyboard: [
-        ...offer.rows,
-        [{ text: 'Открыть TRACE Mini App', web_app: { url: appUrl } }]
+        ...welcome.rows,
+        [{ text: 'Открыть приложение', web_app: { url: appUrl } }]
       ]
     }, 'HTML');
     return jsonResponse({ ok: true });
@@ -3634,15 +3693,19 @@ async function processTelegramUpdate(update, env, url) {
     await sendTelegramMessage(token, chatId,
       '<i>Как пользоваться</i>\n<blockquote>Скажите голосом или напишите: «кофе 50к», «завтра в 9 позвонить маме», «заметка: ...». TRACE разложит фразу на траты, задачи и заметки.</blockquote>\n' +
       '<pre>/subscribe   оформить или продлить\n/status      до какого числа оплачено\n/token       кнопка на iPhone (Shortcut)\n/paysupport  вопросы по оплате\n/terms       условия и данные\n/delete_me   удалить все мои данные\n/help        эта подсказка</pre>' + supportLine(env) +
-      (env.uid === OWNER_ID ? '\n\n<i>Для владельца</i>\n<pre>/users       люди и счётчики\n/usage       расход ИИ\n/grant N дни выдать доступ\n/revoke N    закрыть доступ\n/refund N    вернуть платёж\n/journal     кто и когда выдал или вернул</pre>' : ''), null, 'HTML');
+      (env.uid === OWNER_ID ? '\n\n<i>Для владельца</i>\n<pre>/users       люди и счётчики\n/usage       расход ИИ\n/grant N дни выдать доступ\n/revoke N    закрыть доступ\n/refund N    вернуть платёж\n/journal     кто и когда выдал или вернул\n/setup_profile обновить описание и меню бота</pre>' : ''), null, 'HTML');
     return jsonResponse({ ok: true });
   }
-  if (['users', 'usage', 'grant', 'revoke', 'journal'].includes(commandName)) {
+  if (['users', 'usage', 'grant', 'revoke', 'journal', 'setup_profile'].includes(commandName)) {
     if (env.uid !== OWNER_ID) {
       await sendTelegramMessage(token, chatId, '<i>Эта команда недоступна.</i>', null, 'HTML');
       return jsonResponse({ ok: true });
     }
-    if (commandName === 'users') {
+    if (commandName === 'setup_profile') {
+      const results = await setBotProfile(env, `${url.origin}/app`);
+      const names = { setMyCommands: 'меню команд', setMyDescription: 'описание', setMyShortDescription: 'короткое описание', setChatMenuButton: 'кнопка приложения' };
+      await sendTelegramMessage(token, chatId, '<i>Профиль бота</i>\n<pre>' + Object.entries(results).map(([m, r]) => `${names[m].padEnd(20)}${r === 'ok' ? 'готово' : escapeHtml(r)}`).join('\n') + '</pre>', null, 'HTML');
+    } else if (commandName === 'users') {
       await sendTelegramMessage(token, chatId, await usersCommandText(env), null, 'HTML');
     } else if (commandName === 'journal') {
       await sendTelegramMessage(token, chatId, await journalText(env), null, 'HTML');

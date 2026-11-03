@@ -1200,7 +1200,7 @@ test('access: a new Telegram user can look around but not record until they have
   };
   aiReply = { actions: [fin(1000)] };
   const start = await talk(900, '/start');
-  assert.match(start, /подписка/);
+  assert.match(start, /бесплатно/);
   const row = one(env, 'select * from users where telegram_id = 900');
   assert.equal(row.role, 'user');
   assert.equal(row.status, 'new');
@@ -1877,7 +1877,7 @@ test('trial: a new person starts it once with a button or from the app; an ended
     const start = await hook(env, said(77, '/start'));
     assert.equal(start.status, 200);
     const welcome = callsOf('sendMessage').at(-1);
-    assert.match(welcome.text, /пробный период 3 дня, до 10 записей в день/);
+    assert.match(welcome.text, /Попробуйте бесплатно: 3 дня, до 10 записей в день\. Потом 200 Stars на 30 дней/);
     assert.deepEqual(welcome.reply_markup.inline_keyboard.flat().map(b => b.callback_data).filter(Boolean), ['trial_start', 'sub_buy']);
     const t0 = Date.now();
     await press(env, 'trial_start');
@@ -2189,6 +2189,93 @@ test('security: /api/set-webhook also opens with the webhook secret as X-Setup-K
     const ok = await worker.fetch(new Request('https://t.local/api/set-webhook', { method: 'POST', headers: { 'x-setup-key': 's' } }), env, { waitUntil() {} });
     assert.equal((await json(ok)).ok, true);
     assert.equal(callsOf('setWebhook').length, 1);
+  } finally { restore(); }
+});
+
+// ---------- first meeting: /start for newcomers and the bot's public profile ----------
+test('welcome: a newcomer is told what the bot does, shown example phrases, the trial and the price; others get a short hint', async () => {
+  const env = buyer();
+  const restore = spyTelegram();
+  try {
+    await hook(env, said(77, '/start'));
+    const w = callsOf('sendMessage').at(-1);
+    assert.match(w.text, /Привет! Я TRACE/);
+    assert.match(w.text, /кофе 85 тысяч/);
+    assert.match(w.text, /заметка: размер шин/);
+    assert.match(w.text, /1000 английских слов/);
+    assert.match(w.text, /Попробуйте бесплатно: 3 дня, до 10 записей в день\. Потом 200 Stars на 30 дней/);
+    assert.doesNotMatch(w.text, /\p{Extended_Pictographic}/u);
+    const buttons = w.reply_markup.inline_keyboard.flat();
+    assert.deepEqual(buttons.map(b => b.callback_data).filter(Boolean), ['trial_start', 'sub_buy']);
+    assert.ok(buttons.at(-1).web_app.url.startsWith('https://t.local/app'));
+    assert.equal(buttons.at(-1).text, 'Открыть приложение');
+
+    // someone with access: short text, no offers, only the app button
+    env.DB.raw.exec("update users set status = 'active', sub_until = datetime('now', '+10 days') where id = 2");
+    await hook(env, said(77, '/start'));
+    const a = callsOf('sendMessage').at(-1);
+    assert.doesNotMatch(a.text, /Привет! Я TRACE|бесплатно/);
+    assert.match(a.text, /Скажите голосом или напишите/);
+    assert.deepEqual(a.reply_markup.inline_keyboard.flat().map(b => b.callback_data).filter(Boolean), []);
+
+    // ended subscription: says so and offers to renew
+    env.DB.raw.exec("update users set status = 'expired', sub_until = datetime('now', '-1 days') where id = 2");
+    await hook(env, said(77, '/start'));
+    const e = callsOf('sendMessage').at(-1);
+    assert.match(e.text, /Подписка закончилась/);
+    assert.deepEqual(e.reply_markup.inline_keyboard.flat().map(b => b.callback_data).filter(Boolean), ['sub_buy']);
+  } finally { restore(); }
+});
+
+test('bot profile: /api/set-bot-profile (owner only) sets description, short description, commands and the app button within Telegram limits', async () => {
+  const env = buyer();
+  env.TELEGRAM_BOT_TOKEN = 'bot';
+  const restore = spyTelegram({ setMyCommands: { ok: true, result: true }, setMyDescription: { ok: true, result: true },
+    setMyShortDescription: { ok: true, result: true }, setChatMenuButton: { ok: true, result: true } });
+  try {
+    assert.equal((await asB(env, 'POST', '/api/set-bot-profile')).status, 403);
+    assert.equal((await worker.fetch(new Request('https://t.local/api/set-bot-profile', { method: 'POST' }), env, { waitUntil() {} })).status, 401);
+    assert.equal(tgCalls.length, 0);
+    const ok = await worker.fetch(new Request('https://t.local/api/set-bot-profile', { method: 'POST', headers: { 'x-setup-key': 's' } }), env, { waitUntil() {} });
+    const res = await json(ok);
+    assert.equal(res.ok, true);
+    assert.deepEqual(Object.values(res.results), ['ok', 'ok', 'ok', 'ok']);
+
+    const commands = callsOf('setMyCommands')[0].commands;
+    assert.ok(commands.length >= 1 && commands.length <= 100);
+    for (const c of commands) {
+      assert.match(c.command, /^[a-z0-9_]{1,32}$/);
+      assert.ok(c.description.length >= 3 && c.description.length <= 256);
+    }
+    assert.ok(commands.some(c => c.command === 'app') && commands.some(c => c.command === 'help'));
+    const description = callsOf('setMyDescription')[0].description;
+    assert.ok(description.length <= 512, 'description is ' + description.length);
+    assert.match(description, /Первые 3 дня бесплатно/);
+    assert.ok(callsOf('setMyShortDescription')[0].short_description.length <= 120);
+    const button = callsOf('setChatMenuButton')[0].menu_button;
+    assert.equal(button.type, 'web_app');
+    assert.equal(button.web_app.url, 'https://t.local/app');
+    for (const text of [description, callsOf('setMyShortDescription')[0].short_description, ...commands.map(c => c.description)]) {
+      assert.doesNotMatch(text, /\p{Extended_Pictographic}/u);
+    }
+  } finally { restore(); }
+});
+
+test('bot profile: /setup_profile in the owner\'s chat applies the profile and reports; for anybody else it does nothing', async () => {
+  const env = buyer();
+  env.TELEGRAM_BOT_TOKEN = 'bot';
+  const restore = spyTelegram({ setMyCommands: { ok: true, result: true }, setMyDescription: { ok: true, result: true },
+    setMyShortDescription: { ok: false, description: 'Bad Request: too long' }, setChatMenuButton: { ok: true, result: true } });
+  try {
+    await hook(env, said(77, '/setup_profile'));
+    assert.match(callsOf('sendMessage').at(-1).text, /недоступна/);
+    assert.equal(callsOf('setMyDescription').length, 0);
+    await hook(env, said(42, '/setup_profile'));
+    assert.equal(callsOf('setMyCommands').length, 1);
+    assert.equal(callsOf('setChatMenuButton')[0].menu_button.web_app.url, 'https://t.local/app');
+    const report = callsOf('sendMessage').at(-1).text;
+    assert.match(report, /меню команд\s+готово/);
+    assert.match(report, /короткое описание\s+Bad Request: too long/);
   } finally { restore(); }
 });
 
