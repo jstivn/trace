@@ -69,7 +69,7 @@ npx wrangler secret put GROQ_API_KEY
 npm run deploy
 ```
 
-Then register the webhook as the owner: `POST /api/set-webhook` with the header `X-Setup-Key` set to your webhook secret, and set the Mini App URL (`/app`) in BotFather. In `wrangler.jsonc` change `database_id`, `SUPPORT_CONTACT` and remove `SHORTCUT_URL` (it points to the author's iPhone Shortcut).
+Then register the webhook as the owner: `POST /api/set-webhook` with the header `X-Setup-Key` set to your webhook secret, and set the Mini App URL (`/app`) in BotFather. In `wrangler.jsonc` change `database_id` and `SUPPORT_CONTACT`, remove `SHORTCUT_URL` (it points to the author's iPhone Shortcut), and add `APP_URL` with your own worker address (without it, links lead to the author's copy).
 
 For local work copy `.dev.vars.example` to `.dev.vars`, then:
 
@@ -86,11 +86,11 @@ Open `http://localhost:8787/app?token=<AUTH_TOKEN>` at a phone width.
 npm test
 ```
 
-157 tests run on `node:test` with `node:sqlite` in place of D1 and a mocked `fetch`. GitHub Actions runs them on every push.
+174 tests run on `node:test` with `node:sqlite` in place of D1 and a mocked `fetch`. GitHub Actions runs them on every push.
 
 ## Status
 
-Built and used daily by its author. The payment flow, limits and refunds are covered by tests; a payment with real Stars has not been run end to end yet.
+Built and used daily by its author. The payment flow, limits and refunds are covered by tests, and a payment with real Stars has been run in production.
 
 ## Credits and licence
 
