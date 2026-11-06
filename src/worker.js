@@ -422,7 +422,7 @@ async function handleSuccessfulPayment(env, chatId, message) {
     throw e;
   }
   await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId,
-    `<i>Оплата получена</i>\n<blockquote>Подписка действует до <b>${ruDate(until, env.tzMs)}</b>.</blockquote>`, null, 'HTML');
+    `<i>Оплата получена</i>\n<blockquote>Подписка действует до <b>${ruDate(until, env.tzMs)}</b>.</blockquote>`, await shortcutOfferMarkup(env), 'HTML');
 }
 
 /** Gives the money back (owner only). The subscription loses the days that payment bought. */
@@ -668,6 +668,7 @@ async function getSubscriptionInfo(env) {
     period_days: plan.days,
     daily_limit: dailyLimitFor(state, limits),
     used_today: usedToday(fresh, env),
+    has_token: !!fresh.token,
     can_start_trial: state === 'new' && !fresh.trial_used && limits.trialDays > 0,
     trial_days: limits.trialDays,
     support: env.SUPPORT_CONTACT || null
@@ -803,14 +804,19 @@ const BOT_EXAMPLES = '<pre>кофе 85 тысяч\nзавтра в 9 позво�
 async function welcomeCard(env) {
   const state = subscriptionState(env.user);
   if (state === 'owner' || state === 'trial' || state === 'active') {
-    return { text: '<b>TRACE</b>\n\nСкажите голосом или напишите, я запишу:\n' + BOT_EXAMPLES + '<i>Всё записанное видно в приложении. Подсказка по командам: /help</i>', rows: [] };
+    const offerButton = state !== 'owner' && !(await hasToken(env));
+    return {
+      text: '<b>TRACE</b>\n\nСкажите голосом или напишите, я запишу:\n' + BOT_EXAMPLES + '<i>Всё записанное видно в приложении. Подсказка по командам: /help</i>' +
+        (offerButton ? '\n\nНа iPhone можно записывать голосом одним нажатием, не открывая Telegram.' : ''),
+      rows: offerButton ? [SHORTCUT_OFFER_ROW] : []
+    };
   }
   const offer = await accessOffer(env);
   if (state === 'expired') {
     return { text: '<b>TRACE</b>\n\n' + escapeHtml(offer.line) + '\n\n<i>Уже сделанные записи можно смотреть в приложении.</i>', rows: offer.rows };
   }
   const intro = '<b>Привет! Я TRACE.</b>\n\nГоворите или пишите как есть, а я запишу:\n' + BOT_EXAMPLES +
-    'Получится трата, задача с напоминанием и заметка. Всё видно в приложении: траты, задачи, заметки и 1000 английских слов с примерами.\n\n';
+    'Получится трата, задача с напоминанием и заметка. Всё видно в приложении: траты, задачи, заметки и 1000 английских слов с примерами. На iPhone можно подключить запись одной кнопкой: /shortcut\n\n';
   const limits = await subscriptionLimits(env);
   if (!env.user.trial_used && limits.trialDays > 0) {
     const plan = await subscriptionPlan(env);
@@ -970,24 +976,52 @@ async function hasToken(env) {
 /** The steps for building the button on the iPhone, as plain lines (the bot and the Mini App show the same list). */
 function shortcutSteps(env, origin) {
   const hook = `${origin}/api/voice-hook`;
-  const ready = env.SHORTCUT_URL ? [`Откройте готовую команду и нажмите «Добавить команду»: ${env.SHORTCUT_URL}`, 'Когда она спросит токен, вставьте его. Если кнопка «Добавить» не нажимается, выберите «Пропустить настройку», откройте добавленную команду и вставьте токен в действие «Текст».'] : [];
+  const ready = env.SHORTCUT_URL ? ['Откройте готовую команду и добавьте её в приложение «Быстрые команды».', 'Когда она спросит токен, вставьте его. Если кнопка «Добавить» не нажимается, выберите «Пропустить настройку», откройте добавленную команду и вставьте токен в действие «Текст».'] : [];
   return {
     ready,
-    // Where to put the finished command so that one press starts the recording
+    shortcut_url: env.SHORTCUT_URL || null,
+    // Ways to start the finished command (the labels were checked against support.apple.com, iOS 26-27, 06.11.2026)
     placement: [
-      'Кнопка действия (iPhone 15 Pro и новее): Настройки → Кнопка действия → листайте до «Быстрая команда» → «Выбрать быструю команду» → выберите добавленную команду.',
-      'Экран «Домой» (любой iPhone): в приложении «Команды» откройте команду, нажмите (i) → «Добавить на экран «Домой»» → «Добавить».',
-      'Касание задней панели (iPhone 8 и новее): Настройки → Универсальный доступ → Касание → Касание задней панели → «Двойное касание» → выберите команду.'
+      { title: 'Кнопка действия', fits: 'iPhone 15 Pro, 15 Pro Max, все iPhone 16 и новее', how: 'Настройки → Кнопка действия → листайте до «Быстрые команды» → нажмите кнопку под надписью → выберите TRACE. Запуск: нажать и удерживать кнопку.' },
+      { title: 'Касание задней панели', fits: 'iPhone 8 и новее', how: 'Настройки → Универсальный доступ → Касание → Касание задней панели → «Двойное касание» → в разделе «Быстрые команды» выберите TRACE. Запуск: дважды постучать по задней стороне телефона.' },
+      { title: 'Значок на экране «Домой»', fits: 'любой iPhone', how: 'В приложении «Быстрые команды» нажмите «…» на карточке TRACE, затем (i) → «Добавить на экран "Домой"» → «Добавить». Запуск: нажать на значок.' },
+      { title: 'Пункт управления', fits: 'iOS 18 и новее', how: 'Откройте Пункт управления, нажмите «+» вверху слева → «Добавить элемент управления» → «Быстрая команда» → «Выбрать» → TRACE. Запуск: нажать на значок в Пункте управления.' },
+      { title: 'Экран блокировки', fits: 'iOS 18 и новее', how: 'Удерживайте палец на экране блокировки → «Настроить». Уберите значок внизу кнопкой «−», на его месте нажмите «+» → «Быстрая команда» → «Выбрать» → TRACE. iPhone может попросить разблокировку.' },
+      { title: 'Голосом через Siri', fits: 'любой iPhone с Siri', how: 'Вызовите Siri и назовите команду: «TRACE». Если Siri не понимает название, переименуйте команду, например в «Запись».' }
     ],
     manual: [
-      'Откройте на iPhone приложение «Команды» и нажмите «+».',
+      'Откройте на iPhone приложение «Быстрые команды» и нажмите «+».',
       'Добавьте действие «Текст» и впишите в него ваш токен.',
       'Добавьте действие «Записать аудио».',
       'Добавьте действие «Получить содержимое URL». Адрес: ' + hook + '. Метод: POST. Тело запроса: «Файл», выберите «Записанное аудио».',
       'В этом же действии откройте «Заголовки» и добавьте один: ключ X-Token, значение — результат действия «Текст».',
-      'Назовите команду, например «TRACE», и вынесите её на главный экран или на кнопку действия. Ответ придёт карточкой в Telegram.'
+      'Назовите команду «TRACE» и выберите, как её запускать (варианты ниже). Ответ придёт карточкой в Telegram.'
     ]
   };
+}
+
+const SHORTCUT_OFFER_ROW = [{ text: 'Подключить кнопку на iPhone', callback_data: 'shortcut_guide' }];
+const shortcutOfferMarkup = async (env) => (await hasToken(env)) ? null : { inline_keyboard: [SHORTCUT_OFFER_ROW] };
+
+/** The whole guide as one bot message: a token (issued only by /token or the button), the steps, a button with the link, the ways to start it. */
+async function sendShortcutGuide(env, token, chatId, origin, { issue = true, reissue = false } = {}) {
+  const had = await hasToken(env);
+  const steps = shortcutSteps(env, origin);
+  const list = (steps.ready.length ? steps.ready : steps.manual).map((s, i) => `${i + 1}. ${escapeHtml(s)}`).join('\n') +
+    (steps.shortcut_url ? `\n\nСсылка на готовую команду (нажмите, чтобы скопировать):\n<code>${escapeHtml(steps.shortcut_url)}</code>` : '') +
+    '\n\n<i>Как запускать запись</i>\nКнопка действия есть не на всех iPhone. Выберите любой удобный способ:\n\n' +
+    steps.placement.map(p => `<b>${escapeHtml(p.title)}</b> (${escapeHtml(p.fits)})\n${escapeHtml(p.how)}`).join('\n\n');
+  const markup = steps.shortcut_url ? { inline_keyboard: [[{ text: 'Добавить команду', url: steps.shortcut_url }]] } : null;
+  if (!issue || (had && !reissue)) {
+    await sendTelegramMessage(token, chatId,
+      '<i>Кнопка на iPhone</i>\n<blockquote>' + (had ? 'Токен уже выдан, он показывается один раз.' : 'Токена ещё нет: /token выдаст его.') +
+      ' Потеряли токен или кажется, что он утёк: /token new выдаст новый, старый перестанет работать.</blockquote>\n' + list, markup, 'HTML');
+    return;
+  }
+  const personal = await issueToken(env);
+  await sendTelegramMessage(token, chatId,
+    '<i>' + (had ? 'Новый токен (старый больше не работает)' : 'Ваш личный токен для кнопки на iPhone') + '</i>\n<blockquote><code>' + personal + '</code></blockquote>\n' +
+    '<i>Нажмите на токен, чтобы скопировать. Он показывается один раз, никому его не показывайте. После настройки удалите это сообщение.</i>\n\n' + list, markup, 'HTML');
 }
 
 /** GET /api/shortcut: is a token issued, and the steps. POST /api/token: issue (or reissue) it, shown once. */
@@ -3593,7 +3627,12 @@ async function processTelegramUpdate(update, env, url) {
     } else if (data === 'trial_start') {
       const res = await startTrial(env);
       await answer(res.ok ? 'Пробный период начался' : res.error);
-      if (res.ok && cb.message?.chat?.id) await sendTelegramMessage(token, cb.message.chat.id, trialStartedText(res, env), null, 'HTML');
+      if (res.ok && cb.message?.chat?.id) {
+        await sendTelegramMessage(token, cb.message.chat.id, trialStartedText(res, env), await shortcutOfferMarkup(env), 'HTML');
+      }
+    } else if (data === 'shortcut_guide') {
+      await answer('Отправляю инструкцию');
+      if (cb.message?.chat?.id) await sendShortcutGuide(env, token, cb.message.chat.id, url.origin);
     } else if (data.startsWith('done_')) {
       const taskId = parseInt(data.split('_')[1], 10);
       const task = env.DB && taskId ? await env.DB.prepare('SELECT title FROM tasks WHERE id = ? AND user_id = ?').bind(taskId, env.uid).first() : null;
@@ -3732,21 +3771,10 @@ async function processTelegramUpdate(update, env, url) {
     return jsonResponse({ ok: true });
   }
   if (commandName === 'token' || commandName === 'shortcut') {
-    const reissue = /^new\b/i.test(String(command[2] || '').trim());
-    const had = await hasToken(env);
-    const steps = shortcutSteps(env, url.origin);
-    const list = (steps.ready.length ? steps.ready : steps.manual).map((s, i) => `${i + 1}. ${escapeHtml(s)}`).join('\n') +
-      '\n\n<i>Как вынести на кнопку</i>\n' + steps.placement.map((s, i) => `${i + 1}. ${escapeHtml(s)}`).join('\n');
-    if (commandName === 'shortcut' || (had && !reissue)) {
-      await sendTelegramMessage(token, chatId,
-        '<i>Кнопка на iPhone</i>\n<blockquote>' + (had ? 'Токен уже выдан, он показывается один раз.' : 'Токена ещё нет: /token выдаст его.') +
-        ' Потеряли токен или кажется, что он утёк: /token new выдаст новый, старый перестанет работать.</blockquote>\n' + list, null, 'HTML');
-      return jsonResponse({ ok: true });
-    }
-    const personal = await issueToken(env);
-    await sendTelegramMessage(token, chatId,
-      '<i>' + (had ? 'Новый токен (старый больше не работает)' : 'Ваш личный токен для кнопки на iPhone') + '</i>\n<blockquote><code>' + personal + '</code></blockquote>\n' +
-      '<i>Нажмите на токен, чтобы скопировать. Он показывается один раз, никому его не показывайте. После настройки удалите это сообщение.</i>\n\n' + list, null, 'HTML');
+    await sendShortcutGuide(env, token, chatId, url.origin, {
+      issue: commandName === 'token',
+      reissue: /^new\b/i.test(String(command[2] || '').trim())
+    });
     return jsonResponse({ ok: true });
   }
   if (commandName === 'paysupport') {
@@ -3771,7 +3799,7 @@ async function processTelegramUpdate(update, env, url) {
   if (commandName === 'help') {
     await sendTelegramMessage(token, chatId,
       '<i>Как пользоваться</i>\n<blockquote>Скажите голосом или напишите: «кофе 50к», «завтра в 9 позвонить маме», «заметка: ...». TRACE разложит фразу на траты, задачи и заметки.</blockquote>\n' +
-      '<pre>/subscribe   оформить или продлить\n/status      до какого числа оплачено\n/token       кнопка на iPhone (Shortcut)\n/paysupport  вопросы по оплате\n/terms       условия и данные\n/delete_me   удалить все мои данные\n/help        эта подсказка</pre>' + supportLine(env) +
+      '<pre>/subscribe   оформить или продлить\n/status      до какого числа оплачено\n/token       запись кнопкой на iPhone\n/paysupport  вопросы по оплате\n/terms       условия и данные\n/delete_me   удалить все мои данные\n/help        эта подсказка</pre>' + supportLine(env) +
       (env.uid === OWNER_ID ? '\n\n<i>Для владельца</i>\n<pre>/users       люди и счётчики\n/usage       расход ИИ\n/grant N дни выдать доступ\n/revoke N    закрыть доступ\n/refund N    вернуть платёж\n/journal     кто и когда выдал или вернул\n/setup_profile обновить описание и меню бота</pre>' : ''), null, 'HTML');
     return jsonResponse({ ok: true });
   }

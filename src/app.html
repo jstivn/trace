@@ -383,7 +383,19 @@
     .quote { margin: 0 0 var(--s4); padding: var(--s3) var(--s4); border-radius: var(--r-md); background: var(--bg); font-size: var(--text-secondary); color: var(--ink-2); }
     .quote .label { display: block; font-size: var(--text-meta); line-height: 1.4; color: var(--ink-3); margin-bottom: 2px; }
     .secret { display: flex; align-items: flex-start; gap: var(--s2); }
-    .secret .value { flex: 1; min-width: 0; padding: var(--s3); border-radius: var(--r-md); background: var(--bg); overflow-wrap: anywhere; }
+    .secret .value { flex: 1; min-width: 0; padding: var(--s3); border-radius: var(--r-md); background: var(--bg); overflow-wrap: anywhere; -webkit-user-select: all; user-select: all; }
+    .connect > .settings-group > .btn, .connect #tokenBox > .btn { width: 100%; margin-top: var(--s3); }
+    .connect .secret { margin-top: var(--s2); }
+    .how { border-top: 1px solid var(--line); }
+    .how:first-of-type { margin-top: var(--s2); }
+    .how summary { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); min-height: 48px; padding: var(--s2) 0; cursor: pointer; font-size: var(--text-secondary); font-weight: 600; }
+    .how summary small { flex: 0 1 50%; font-size: var(--text-meta); font-weight: 400; line-height: 1.3; text-align: right; color: var(--ink-3); }
+    .how-body { padding-bottom: var(--s3); font-size: var(--text-secondary); line-height: 1.45; overflow-wrap: anywhere; color: var(--ink-2); }
+    .connect-hint { margin-bottom: var(--s4); padding: var(--s4); border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); }
+    .connect-hint[hidden] { display: none; }
+    .connect-hint h2 { font-size: var(--text-body); font-weight: 600; line-height: 1.35; }
+    .connect-hint p { margin-top: var(--s1); font-size: var(--text-secondary); line-height: 1.4; color: var(--ink-2); }
+    .connect-hint-actions { display: flex; gap: var(--s2); margin-top: var(--s3); }
 
     /* Toast */
     .toast {
@@ -467,6 +479,14 @@
       <button type="button" class="icon-btn" data-action="settings" title="Настройки" aria-label="Настройки"><svg class="i"><use href="#i-settings"/></svg></button>
     </div>
     <button type="button" class="review-banner" data-action="open-review" hidden></button>
+    <section class="connect-hint" id="connectHint" aria-labelledby="connectHintTitle" hidden>
+      <h2 id="connectHintTitle">Запись одной кнопкой</h2>
+      <p>Голос на iPhone сразу попадает в TRACE, приложение открывать не нужно. Кнопка действия не обязательна.</p>
+      <div class="connect-hint-actions">
+        <button type="button" class="btn small primary" data-action="shortcut">Подключить</button>
+        <button type="button" class="btn small" data-action="connect-hide">Скрыть</button>
+      </div>
+    </section>
     <div class="day-nav">
       <div class="side">
         <button type="button" class="icon-btn" data-action="day-prev" title="Предыдущий день" aria-label="Предыдущий день"><svg class="i"><use href="#i-left"/></svg></button>
@@ -1949,6 +1969,7 @@
     }
 
     // Personal token for the iPhone Shortcut: issued here (or by /token in the bot), shown once, kept by the server only as a hash
+    let shortcutUrl = '';
     async function shortcutSheet() {
       openSheet({ title: 'Кнопка на iPhone', kind: 'shortcut', body: '<div class="skeleton" aria-hidden="true"><div></div><div></div></div>', noFooter: true });
       let info;
@@ -1961,15 +1982,39 @@
       }
       const body = $('sheet').querySelector('.sheet-body');
       if (!body || !sheetCfg || sheetCfg.kind !== 'shortcut') return;
-      const steps = (info.ready && info.ready.length ? info.ready : info.manual) || [];
+      // Shortcuts exist only on iPhone: on Android a guide would be a dead end
+      if (tg && tg.platform === 'android') {
+        body.innerHTML = '<div class="settings-group"><p class="hint" style="margin-top:0">Кнопка работает только на iPhone. На Android отправляйте боту голосовое сообщение или пишите в поле внизу приложения.</p></div>';
+        return;
+      }
+      shortcutUrl = info.shortcut_url || '';
+      const stepList = (list) => '<ol class="steps" style="margin:0; padding-left:20px; display:grid; gap:8px">' + list.map(s => '<li>' + esc(s) + '</li>').join('') + '</ol>';
+      const copyRow = (id, value) => '<div class="secret"><span class="value" id="' + id + '">' + esc(value) + '</span>' +
+        '<button type="button" class="btn" data-action="copy-from" data-target="' + id + '">Скопировать</button></div>';
+      const manual = stepList(info.manual || []) +
+        '<p class="hint">Адрес для шага с «Получить содержимое URL»:</p>' + copyRow('hookUrl', info.hook_url || '');
       body.innerHTML =
-        '<div class="settings-group"><h3>Токен</h3>' +
+        '<div class="connect">' +
+        '<div class="settings-group"><h3>1. Получите токен</h3>' +
           '<div id="tokenBox"><p class="hint" style="margin-top:0">' + (info.has_token ? 'Токен уже выдан. Он показывается один раз. Если потеряли, получите новый: старый перестанет работать.' : 'Токен — это ваш личный пароль для кнопки. Он показывается один раз.') + '</p>' +
           '<button type="button" class="btn primary" data-action="token-issue">' + (info.has_token ? 'Получить новый токен' : 'Получить токен') + '</button></div></div>' +
-        '<div class="settings-group"><h3>Как подключить</h3><ol class="steps" style="margin:0; padding-left:20px; display:grid; gap:8px">' +
-          steps.map(s => '<li>' + esc(s) + '</li>').join('') + '</ol></div>' +
-        '<div class="settings-group"><h3>Как вынести на кнопку</h3><ol class="steps" style="margin:0; padding-left:20px; display:grid; gap:8px">' +
-          (info.placement || []).map(s => '<li>' + esc(s) + '</li>').join('') + '</ol></div>';
+        '<div class="settings-group"><h3>2. Добавьте команду</h3>' +
+          (shortcutUrl
+            ? stepList(info.ready || []) +
+              '<button type="button" class="btn primary" data-action="shortcut-open">Добавить команду</button>' +
+              '<p class="hint">Если открываете на другом устройстве, скопируйте ссылку и откройте её на iPhone:</p>' + copyRow('shortcutLink', shortcutUrl) +
+              '<details class="how"><summary><span>Настроить вручную</span></summary><div class="how-body">' + manual + '</div></details>'
+            : manual) +
+        '</div>' +
+        '<div class="settings-group"><h3>3. Выберите, как запускать</h3>' +
+          '<p class="hint" style="margin-top:0">Кнопка действия есть не на всех iPhone. Без неё подойдёт любой другой способ.</p>' +
+          (info.placement || []).map(p => '<details class="how"><summary><span>' + esc(p.title) + '</span><small>' + esc(p.fits) + '</small></summary><div class="how-body">' + esc(p.how) + '</div></details>').join('') +
+        '</div></div>';
+    }
+    function openShortcutLink() {
+      if (!shortcutUrl) return;
+      if (tg && tg.openLink) tg.openLink(shortcutUrl);
+      else window.open(shortcutUrl, '_blank');
     }
     async function issueTokenAction(el) {
       el.disabled = true;
@@ -1978,20 +2023,15 @@
         const box = $('tokenBox');
         if (!box) return;
         box.innerHTML = '<div class="secret"><span class="value" id="tokenValue">' + esc(r.token) + '</span>' +
-          '<button type="button" class="btn" data-action="token-copy">Копировать</button></div>' +
-          '<p class="hint">Сохраните его сейчас: больше он не покажется. Никому его не отправляйте.</p>';
+          '<button type="button" class="btn" data-action="copy-from" data-target="tokenValue">Скопировать</button></div>' +
+          '<p class="hint">Не закрывайте этот экран, пока не вставите токен в команду: больше он не покажется. Никому его не отправляйте.</p>';
         haptic('success');
+        loadAccess();
       } catch (e) {
         el.disabled = false;
         if (e instanceof AuthError) return;
         toast('Не удалось получить токен. Попробуйте снова.');
       }
-    }
-    async function copyToken() {
-      const v = $('tokenValue') && $('tokenValue').textContent;
-      if (!v) return;
-      try { await navigator.clipboard.writeText(v); toast('Скопировано'); }
-      catch (e) { toast('Не удалось скопировать. Выделите токен и скопируйте вручную.'); }
     }
 
     // Terms (same text as the bot's /terms) and erasing one's data
@@ -2052,6 +2092,11 @@
       const amount = Number(s.limit_amount || 0);
       const shown = cur === 'VND' || cur === 'RUB' ? Math.round(amount) : Math.round(amount * 100) / 100;
       body.innerHTML = subscriptionCard(sub) +
+        (sub && sub.state === 'owner' ? '' :
+        '<div class="settings-group"><h3>Кнопка на iPhone</h3>' +
+          '<button type="button" class="btn" data-action="shortcut">' + (sub && sub.has_token ? 'Инструкция и способы запуска' : 'Подключить') + '</button>' +
+          '<p class="hint">Запись голосом одним нажатием, без открытия приложения. Подойдёт и iPhone без кнопки действия.</p>' +
+        '</div>') +
         '<div class="settings-group"><h3>Дневной лимит</h3>' +
           '<label class="switch-row"><span>Следить за лимитом трат</span><input type="checkbox" role="switch" name="limitOn" data-change="limit-toggle"' + (s.limit_enabled ? ' checked' : '') + '></label>' +
           '<div class="field" id="limitField"' + (s.limit_enabled ? '' : ' hidden') + '><label for="sLimit">Сколько в день, ' + esc(CURRENCY_SIGNS[cur] || cur) + '</label>' +
@@ -2089,11 +2134,6 @@
           '<button type="button" class="btn" data-action="recurring">Подписки, аренда, интернет</button>' +
           '<p class="hint">Платёж и задача сами появляются в нужное число каждого месяца.</p>' +
         '</div>' +
-        (sub && sub.state === 'owner' ? '' :
-        '<div class="settings-group"><h3>Кнопка на iPhone</h3>' +
-          '<button type="button" class="btn" data-action="shortcut">Подключить</button>' +
-          '<p class="hint">Запись голосом одним нажатием, без открытия приложения.</p>' +
-        '</div>') +
         '<div class="settings-group"><h3>Условия и данные</h3>' +
           '<button type="button" class="btn" data-action="terms">Условия и конфиденциальность</button>' +
           (sub && sub.state === 'owner' ? '' :
@@ -2584,9 +2624,34 @@
         r.readAsDataURL(blob);
       });
     }
-    async function copyText(text) {
-      try { await navigator.clipboard.writeText(text); toast('Скопировано'); }
-      catch (e) { toast('Не удалось скопировать. Выделите текст вручную.'); }
+    // The Telegram web view may refuse navigator.clipboard, so the old way is the fallback
+    function legacyCopy(text) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.readOnly = true;
+      ta.style.cssText = 'position:fixed; top:0; left:0; opacity:0; font-size:16px';
+      (document.querySelector('dialog[open]') || document.body).appendChild(ta);
+      ta.select();
+      ta.setSelectionRange(0, text.length);
+      let ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) {}
+      ta.remove();
+      return ok;
+    }
+    async function copyText(text, shownIn) {
+      let ok = false;
+      try { await navigator.clipboard.writeText(text); ok = true; }
+      catch (e) { ok = legacyCopy(text); }
+      if (ok) { haptic('success'); toast('Скопировано'); return; }
+      // Last resort: leave the text selected so that the system "Скопировать" menu is one tap away
+      if (shownIn) {
+        const range = document.createRange();
+        range.selectNodeContents(shownIn);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+      toast('Не получилось скопировать сразу. Текст выделен, нажмите «Скопировать» в меню телефона.');
     }
 
     // ================= Access: dim the "create" buttons when there is no subscription =================
@@ -2596,7 +2661,23 @@
       haptic('error');
       toast('Добавлять записи можно после оформления подписки.', { label: 'Подписка', run: settingsSheet });
     }
+    // A one-time invitation on the day screen: only for iPhone (or a plain browser), with access, and until there is a token
+    const CONNECT_HIDDEN_KEY = 'trace_connect_hint_hidden';
+    function connectHintDismissed() {
+      try { return localStorage.getItem(CONNECT_HIDDEN_KEY) === '1'; } catch (e) { return false; }
+    }
+    function syncConnectHint(sub) {
+      const onIphone = !tg || !tg.platform || tg.platform === 'ios' || tg.platform === 'unknown';
+      const live = !!sub && (sub.state === 'trial' || sub.state === 'active');
+      $('connectHint').hidden = !(live && onIphone && !sub.has_token && !connectHintDismissed());
+    }
+    function hideConnectHint() {
+      try { localStorage.setItem(CONNECT_HIDDEN_KEY, '1'); } catch (e) {}
+      $('connectHint').hidden = true;
+      toast('Подключить можно в Настройках');
+    }
     function setAccess(sub) {
+      if (sub) syncConnectHint(sub);
       const locked = !!sub && (sub.state === 'new' || sub.state === 'expired');
       document.body.classList.toggle('no-access', locked);
       document.querySelectorAll('[data-action="new-task"], [data-action="new-note"], [data-action="new-word"], [data-action="mic"], #sendBtn')
@@ -2688,7 +2769,9 @@
         case 'delete-me-ask': deleteMeSheet(); break;
         case 'delete-me-confirm': deleteMeAction(el); break;
         case 'token-issue': issueTokenAction(el); break;
-        case 'token-copy': copyToken(); break;
+        case 'copy-from': { const src = $(el.dataset.target); if (src) copyText(src.textContent, src); break; }
+        case 'shortcut-open': openShortcutLink(); break;
+        case 'connect-hide': hideConnectHint(); break;
         case 'sub-trial': subTrial(el); break;
         case 'sub-buy': subBuy(el); break;
         case 'recurring': recurringSheet(); break;

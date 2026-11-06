@@ -1819,14 +1819,60 @@ test('token: the Mini App route needs Telegram, a token cannot issue its own rep
   assert.equal((await asB(env, 'POST', '/api/token')).status, 403);
   assert.equal((await asB(env, 'GET', '/api/shortcut')).status, 200);
   const info = await json(await asB(env, 'GET', '/api/shortcut'));
-  assert.equal(info.placement.length, 3);
-  assert.match(info.placement.join('\n'), /Кнопка действия[\s\S]*Экран «Домой»[\s\S]*задней панели/);
+  assert.equal(info.placement.length, 6);
+  assert.match(info.placement.map(p => p.title).join('\n'), /Кнопка действия[\s\S]*задней панели[\s\S]*экране «Домой»[\s\S]*Пункт управления[\s\S]*блокировки[\s\S]*Siri/);
+  assert.ok(info.placement.every(p => p.title && p.fits && p.how));
+  assert.equal(info.shortcut_url, null);
   const restore = spyTelegram();
   try {
     await hook(env, said(77, '/shortcut'));
-    assert.match(callsOf('sendMessage').at(-1).text, /Как вынести на кнопку[\s\S]*Кнопка действия/);
+    assert.match(callsOf('sendMessage').at(-1).text, /Как запускать запись[\s\S]*не на всех iPhone[\s\S]*Кнопка действия[\s\S]*Siri/);
   } finally { restore(); }
   assert.equal((await call(env, 'POST', '/api/token', undefined, { 'x-token': 'nope' })).status, 401);
+});
+
+test('token: the ready command comes as a button and a tap-to-copy link, and the guide fits one Telegram message', async () => {
+  const env = buyer();
+  const link = 'https://www.icloud.com/shortcuts/2c97e20d0000000000000000000000';
+  env.SHORTCUT_URL = link;
+  assert.equal((await json(await asB(env, 'GET', '/api/shortcut'))).shortcut_url, link);
+  const restore = spyTelegram();
+  try {
+    env.DB.raw.exec("update users set token = null where id = 2");
+    tgCalls.length = 0;
+    await hook(env, said(77, '/token'));
+    const m = callsOf('sendMessage').at(-1);
+    assert.match(m.text, new RegExp(`<code>${link}</code>`));
+    assert.equal(m.reply_markup.inline_keyboard[0][0].url, link);
+    assert.ok(m.text.length < 4096, `the guide is ${m.text.length} characters`);
+    assert.doesNotMatch(m.text, /\p{Extended_Pictographic}/u);
+  } finally { restore(); }
+});
+
+test('token: a person with access and no token is offered the button, and it stops once the token exists', async () => {
+  const env = buyer();
+  const restore = spyTelegram();
+  const offered = (m) => JSON.stringify(m.reply_markup || {}).includes('shortcut_guide');
+  const pressButton = (_env, _chat, data) => hook(env, { callback_query: { id: 'c', data, from: { id: 77 }, message: { chat: { id: 77 }, message_id: 5, text: 'x' } } });
+  try {
+    env.DB.raw.exec("update users set token = null, status = 'new', sub_until = null, trial_used = 0 where id = 2");
+    await hook(env, said(77, '/start'));
+    const fresh = callsOf('sendMessage').at(-1);
+    assert.match(fresh.text, /запись одной кнопкой: \/shortcut/);
+    assert.equal(offered(fresh), false);
+
+    await pressButton(env, 77, 'trial_start');
+    assert.equal(offered(callsOf('sendMessage').at(-1)), true);
+    await hook(env, said(77, '/start'));
+    assert.equal(offered(callsOf('sendMessage').at(-1)), true);
+
+    await pressButton(env, 77, 'shortcut_guide');
+    const tok = /<code>([A-Za-z0-9_-]{43})<\/code>/.exec(callsOf('sendMessage').at(-1).text)?.[1];
+    assert.ok(tok, 'the button issues the token');
+    await hook(env, said(77, '/start'));
+    assert.equal(offered(callsOf('sendMessage').at(-1)), false);
+    assert.equal((await json(await call(env, 'GET', '/api/subscription', undefined, { 'x-token': tok }))).has_token, true);
+  } finally { restore(); }
 });
 
 test('terms: /terms shows the agreed wording (refund 7 days / 10 records, AI services named) and the API gives the same sections', async () => {
