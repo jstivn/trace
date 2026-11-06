@@ -9,6 +9,10 @@
   "observability": {
     "enabled": true
   },
+  // Singapore: the D1 base lives there and Google allows Gemini from there (not from Hong Kong)
+  "placement": {
+    "region": "aws:ap-southeast-1"
+  },
   "d1_databases": [
     {
       "binding": "DB",

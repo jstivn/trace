@@ -194,6 +194,7 @@ const TIMEZONE_CHOICES = [
   ['Europe/London', 'Лондон'], ['America/New_York', 'Нью-Йорк']
 ];
 const TIMEZONE_IDS = TIMEZONE_CHOICES.map(t => t[0]);
+const TZ_CHANGE_COOLDOWN_MS = 24 * 3600 * 1000;
 
 /** Minutes the zone is ahead of UTC right now (Europe/Moscow = 180); 420 (Nha Trang) for an unknown zone. */
 function tzOffsetMinutes(tz, now = new Date()) {
@@ -1402,6 +1403,9 @@ function detectAudioMime(base64Str, defaultMime = 'audio/m4a') {
 }
 
 const CATEGORY_CONFIDENCE_THRESHOLD = 0.7;
+const STT_HINT = 'Расходы и долги: еда, вода, кофе, такси, долг, Арбуз вернул долг. Нячанг, Камрань, CXR, Sparc, Meta Ad Library.';
+// A currency the user really said; without one the LLM may not pick a foreign currency ("70 тысяч долл карбуз" became 70 000 USD)
+const CURRENCY_SAID_RX = /(?:^|[\s\d])(?:донг|vnd|руб|р(?=[\s.,]|$)|usd|доллар|dollar|бакс|aed|дирхам|тенге|kzt|гривн|грн|uah|евро|eur)|[$€₽₫]/iu;
 
 /**
  * Speech-to-Text with multi-provider cascade:
@@ -1413,9 +1417,9 @@ async function transcribeSpeech(audioBytes, audioMime, vocabList, env) {
   // STT_LANGUAGE: 'ru' (default), another ISO code, or 'auto' to let Whisper detect it (mixed RU/EN speech)
   const sttLangEnv = (env.STT_LANGUAGE || 'ru').toLowerCase();
   const sttLanguage = sttLangEnv === 'auto' ? '' : sttLangEnv;
-  const vocabPrompt = Array.isArray(vocabList) && vocabList.length > 0
-    ? vocabList.slice(0, 50).join(', ')
-    : 'Нячанг, Камрань, CXR, Sparc, Meta Ad Library';
+  // Whisper hears short phrases through this hint. Learned words stay out of it: "dog" from the dictionary turned "долг" into "дог".
+  // Echo on silence is caught by isSttHallucination; the hint has no numbers, so an echo cannot become an expense.
+  const vocabPrompt = STT_HINT;
 
   // 1. Try Groq Whisper Large V3 if GROQ_API_KEY is configured
   if (env.GROQ_API_KEY) {
@@ -1524,6 +1528,35 @@ async function transcribeSpeech(audioBytes, audioMime, vocabList, env) {
   return '';
 }
 
+/** Trial: Gemini's own hearing of the audio. Returns one line for the log, never throws, gives up after 6 seconds. */
+async function geminiListen(audioBase64, audioMime, env) {
+  const started = Date.now();
+  const took = () => `${Date.now() - started} мс`;
+  if (!env.GEMINI_API_KEY) return 'gemini: нет ключа';
+  try {
+    const model = env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [
+          { inlineData: { mimeType: /m4a/i.test(audioMime || '') ? 'audio/mp4' : (audioMime || 'audio/mp4'), data: audioBase64 } },
+          { text: 'Запиши дословно, что сказано. Речь русская, бывают суммы, названия и английские слова. Только сказанный текст, без пояснений. Если речи нет, верни пустой ответ.' }
+        ] }],
+        generationConfig: { temperature: 0 }
+      }),
+      signal: AbortSignal.timeout(6000)
+    });
+    if (!res.ok) return `gemini: ошибка ${res.status} (${took()}): ${(await res.text()).replace(/\s+/g, ' ').slice(0, 200)}`;
+    const data = await res.json();
+    const text = (data.candidates?.[0]?.content?.parts || []).filter(p => !p.thought).map(p => p.text || '').join('').trim();
+    noteUsage('stt_gemini');
+    return `gemini (${took()}): "${text}"`;
+  } catch (e) {
+    return `gemini: сбой (${took()}): ${e.message}`;
+  }
+}
+
 /**
  * Whisper fills silence or noise with phrases from its training subtitles ("Субтитры сделал DimaTorzok",
  * "Продолжение следует...") or a lone interjection. Such a transcript is no speech at all.
@@ -1531,7 +1564,7 @@ async function transcribeSpeech(audioBytes, audioMime, vocabList, env) {
 function isSttHallucination(text) {
   const t = String(text || '').toLowerCase().replace(/[^a-zа-яё0-9]+/giu, ' ').trim();
   if (t.replace(/\s/g, '').length < 3) return true;
-  return /(?:субтитр|dimatorzok|редактор субтитров|корректор|продолжение следует|спасибо за просмотр|подписывайтесь на канал|amara org)/iu.test(t);
+  return /(?:субтитр|dimatorzok|редактор субтитров|корректор|продолжение следует|спасибо за просмотр|подписывайтесь на канал|amara org|расходы и долги)/iu.test(t);
 }
 
 /**
@@ -2195,7 +2228,9 @@ async function handleVoiceHook(request, env, opts = {}) {
     const gate = await recordingGate(env);
     if (!gate.ok) {
       if (isText) return new Response(gate.text, { status: gate.status, headers: { 'Content-Type': 'text/plain; charset=utf-8', ...CORS_HEADERS } });
-      return jsonResponse({ ok: false, reason: gate.reason, voice_reply: gate.text, screen_notification: gate.text, haptic: 'warning' }, gate.status);
+      // code + error: the Mini App shows the subscription toast for a 403 with this code (any other 403 used to look like a bad token)
+      const code = gate.status === 403 ? 'subscription_required' : undefined;
+      return jsonResponse({ ok: false, code, error: gate.text, reason: gate.reason, voice_reply: gate.text, screen_notification: gate.text, haptic: 'warning' }, gate.status);
     }
     slotTaken = true;
 
@@ -2281,6 +2316,18 @@ async function handleVoiceHook(request, env, opts = {}) {
       }
     } catch (e) {}
 
+    // Trial, owner only: Gemini hears the same audio side by side with Whisper. Only logged, the record does not use it.
+    const listenTrial = audioBase64 && env.uid === OWNER_ID ? geminiListen(audioBase64, audioMime, env) : null;
+    const finishListenTrial = async () => {
+      if (!listenTrial) return;
+      try {
+        const line = (await listenTrial).slice(0, 400);
+        await env.DB.prepare(
+          'INSERT INTO request_logs (endpoint, method, content_type, body_length, body_preview, user_id) VALUES (?, ?, ?, ?, ?, ?)'
+        ).bind('/api/voice-hook/stt-gemini', request.method, 'text/plain', line.length, line, env.uid).run();
+      } catch (logErr) {}
+    };
+
     // 1. Run Speech-to-Text via multi-provider STT cascade (Groq Whisper -> CF Whisper Large Turbo)
     let whisperText = '';
     if (audioBase64) {
@@ -2313,6 +2360,7 @@ async function handleVoiceHook(request, env, opts = {}) {
 
     if (!effectiveText) {
       await giveBack();
+      await finishListenTrial();
       if (isText) {
         return new Response('Речь не распознана. Попробуйте записать еще раз.', {
           status: 200,
@@ -2338,12 +2386,24 @@ async function handleVoiceHook(request, env, opts = {}) {
 
     // Process text or audio through AI Router:
     const audioForAI = whisperText ? '' : audioBase64;
+    const llmErrors = [];
     const classification = enforceExpenseShape(await classifyWithGemini({
       text: correctedEffectiveText,
       audioBase64: audioForAI,
       mimeType: audioMime,
-      vocabList
+      vocabList,
+      errors: llmErrors
     }, env), effectiveText, env.DEFAULT_CURRENCY || 'VND');
+
+    // Why a provider refused, even when the next one saved the record: otherwise a dead Gemini stays invisible
+    if (llmErrors.length > 0) {
+      try {
+        const reason = llmErrors.join(' ; ').replaceAll(env.GEMINI_API_KEY || '\0', '***').replace(/\s+/g, ' ').slice(0, 500);
+        await env.DB.prepare(
+          'INSERT INTO request_logs (endpoint, method, content_type, body_length, body_preview, user_id) VALUES (?, ?, ?, ?, ?, ?)'
+        ).bind('/api/voice-hook/llm', request.method, 'text/plain', reason.length, `llm: ${reason}`, env.uid).run();
+      } catch (logErr) {}
+    }
 
     if (!rawText && (whisperText || classification.raw_text)) {
       rawText = whisperText || classification.raw_text;
@@ -2373,6 +2433,7 @@ async function handleVoiceHook(request, env, opts = {}) {
 
     let voiceReply = cleanVoice;
     let screenNotification = cleanScreen;
+    const debtLabel = (d = {}) => `${d.repay ? 'Возврат долга' : d.owe ? 'Мой долг' : 'Долг'}: ${d.person || ''} ${Number(d.amount || 0).toLocaleString('ru-RU')} ${d.currency || env.DEFAULT_CURRENCY || 'VND'}`;
 
     if (persistResult?.notFound) {
       await giveBack();                       // nothing was changed: the place goes back
@@ -2394,6 +2455,8 @@ async function handleVoiceHook(request, env, opts = {}) {
           return `Расход: ${amt} ${curr}${title}${day}`;
         } else if (act.type === 'task') {
           return `Задача: ${act.data?.title || 'Создана'}`;
+        } else if (act.type === 'debt') {
+          return debtLabel(act.data);
         } else if (act.type === 'translate') {
           return `Перевод: ${act.data?.word || ''} — ${act.data?.translation || ''}`;
         } else if (act.type === 'update') {
@@ -2414,6 +2477,8 @@ async function handleVoiceHook(request, env, opts = {}) {
         voiceReply = `Расход: ${actions[0].data?.amount || ''} ${actions[0].data?.currency || ''}`;
       } else if (actions[0]?.type === 'task') {
         voiceReply = `Задача создана: ${actions[0].data?.title || ''}`;
+      } else if (actions[0]?.type === 'debt') {
+        voiceReply = debtLabel(actions[0].data);
       } else if (actions[0]?.type === 'translate') {
         voiceReply = `${actions[0].data?.word || ''} — ${actions[0].data?.translation || ''}`;
       } else if (actions[0]?.type === 'update') {
@@ -2444,6 +2509,7 @@ async function handleVoiceHook(request, env, opts = {}) {
         ).run();
       }
     } catch (logErr) {}
+    await finishListenTrial();
 
     if (isText) {
       return new Response(screenNotification, {
@@ -2644,7 +2710,7 @@ ${(input?.vocabList || ['Камрань (CXR)', 'Sparc', 'Meta Ad Library']).joi
 Если названа только дата без времени («на конец ноября», «завтра», «на выходных») — due_datetime возвращай строго в формате 'YYYY-MM-DD' без указания времени (date-only)!
 
 9. ПРАВИЛО ДОКАЗАТЕЛЬСТВА (GROUNDING EVIDENCE):
-Для каждого действия в объекте "actions" ОБЯЗАТЕЛЬНО возвращай поле "evidence" — точную дословную цитату из исходной фразы пользователя, на основании которой создано это действие (например, "полтора миллиона на аренду", "завтра в 10 набрать Ахмеду").
+Для каждого действия в объекте "actions" ОБЯЗАТЕЛЬНО возвращай поле "evidence" — точную дословную цитату из исходной фразы пользователя, на основании которой создано это действие (например, "полтора миллиона на аренду", "завтра в 10 набрать маме").
 ВНИМАНИЕ: Если ты сомневаешься в сумме или категории, или если фраза звучит неразборчиво, ставь "needs_review": true.
 
 Категории действий:
@@ -2741,7 +2807,7 @@ ${(input?.vocabList || ['Камрань (CXR)', 'Sparc', 'Meta Ad Library']).joi
   ];
 
   let rawJson = null;
-  let errors = [];
+  const errors = (typeof input === 'object' && input?.errors) || [];
 
   // Total time budget for the whole LLM cascade: iOS Shortcuts gives up after a while,
   // so stop trying further providers once the budget is spent (heuristic fallback then runs).
@@ -2790,9 +2856,10 @@ ${(input?.vocabList || ['Камрань (CXR)', 'Sparc', 'Meta Ad Library']).joi
               return parsed;
             }
           }
+          errors.push(`${model} [${apiUrl.includes('gateway') ? 'Gateway' : 'Direct'}]: empty or broken answer (${result.candidates?.[0]?.finishReason || 'no reason'})`);
         } else {
           const errText = await response.text();
-          errors.push(`${model} [${apiUrl.includes('gateway') ? 'Gateway' : 'Direct'}] (${response.status}): ${errText}`);
+          errors.push(`${model} [${apiUrl.includes('gateway') ? 'Gateway' : 'Direct'}] (${response.status}): ${errText.slice(0, 200)}`);
           // Remember a regional refusal so the next requests skip the doomed direct call for a while
           if (!apiUrl.includes('gateway') && /location|region|not supported/i.test(errText)) {
             directGeminiBlockedUntil = Date.now() + 30 * 60 * 1000;
@@ -3025,23 +3092,27 @@ async function persistToD1(classification, rawTranscript, coords, env, opts = {}
           }
           data.amount = amount;
           
-          const currency = stripEmojis(data.currency) || env.DEFAULT_CURRENCY || 'VND';
+          let currency = stripEmojis(data.currency) || env.DEFAULT_CURRENCY || 'VND';
+          const defaultCurrency = env.DEFAULT_CURRENCY || 'VND';
+          const currencyGuessed = String(currency).toUpperCase() !== String(defaultCurrency).toUpperCase() && !CURRENCY_SAID_RX.test(String(rawTranscript || ''));
+          if (currencyGuessed) {
+            currency = defaultCurrency;
+            data.currency = currency;
+          }
           let category = stripEmojis(data.category) || 'other';
           let confidence = typeof data.confidence === 'number' ? data.confidence : 1.0;
           const categoryThreshold = parseFloat(env.CATEGORY_CONFIDENCE_THRESHOLD || '0.7');
 
-          // Keyword categories when the LLM is unsure. Look at this expense's own title first: in
-          // "60 тысяч такси и 30 тысяч вода" the taxi must not become food because of the water.
-          if (category === 'unsure' || category === 'other' || !category) {
-            const guess = guessFinanceCategory(data.title || rawTranscript);
-            if (guess) {
-              category = guess;
-              confidence = Math.max(confidence, 0.95);
-            }
+          // An everyday word decides the category, whatever the LLM said (Gemini filed a taxi under services).
+          // Look at this expense's own title first: in "60 тысяч такси и 30 тысяч вода" the taxi must not become food.
+          const guess = guessFinanceCategory(data.title || rawTranscript);
+          if (guess) {
+            category = guess;
+            confidence = Math.max(confidence, 0.95);
           }
 
           let needsReview = 0;
-          if (category === 'unsure' || confidence < categoryThreshold || data.needs_review || amountUnverified || !(amount > 0)) {
+          if (category === 'unsure' || confidence < categoryThreshold || data.needs_review || amountUnverified || currencyGuessed || !(amount > 0)) {
             needsReview = 1;
             hasNeedsReview = true;
           }
@@ -3207,10 +3278,18 @@ async function persistToD1(classification, rawTranscript, coords, env, opts = {}
             break;
           }
 
-          // A debt is an expense with the debt mark; the same person keeps one spelling ("Арбузу" -> "Арбуз")
+          // A debt is an expense with the debt mark; the same person keeps one spelling, the shortest ("Арбузу", "Арбуз дог" -> "Арбуз")
           const known = await env.DB.prepare('SELECT title FROM finances WHERE user_id = ? AND is_debt = 1 AND COALESCE(debt_owe, 0) = ? ORDER BY id DESC LIMIT 50').bind(env.uid, owe ? 1 : 0).all();
-          const same = (known.results || []).find(d => d.title && d.title.toLowerCase().slice(0, 4) === person.toLowerCase().slice(0, 4));
-          if (same) person = same.title;
+          // Word by word: "Тест Cactus" is not "Тест Арбуз", though "Арбузу" is "Арбуз дог"
+          const words = person.toLowerCase().split(/\s+/);
+          const sameName = (title) => {
+            const other = title.toLowerCase().split(/\s+/);
+            return words.slice(0, other.length).every((w, i) => w.slice(0, 4) === other[i].slice(0, 4));
+          };
+          const same = (known.results || []).filter(d => d.title && sameName(d.title))
+            .sort((a, b) => a.title.length - b.title.length)[0];
+          if (same && same.title.length <= person.length) person = same.title;
+          data.person = person;
 
           const ins = await env.DB.prepare(
             `INSERT INTO finances (amount, currency, category, title, raw_text, raw_transcript, outside_limit, is_debt, debt_owe, created_at, user_id)
@@ -3862,7 +3941,7 @@ async function checkAndSendReminders(env, options = {}) {
       return { ok: true, chatId, tasksSent: await checkDueTasks(env, chatId) };
     }
 
-    // Recurring items first: a task they add today is in the morning summary and gets its reminder
+    // Recurring items first: a task they add today gets its reminder
     let recurringFired = [];
     try {
       recurringFired = await runRecurring(env);
@@ -4264,8 +4343,8 @@ function recurringStartMonth(day, now = new Date(), offMs = NHA_TRANG_OFFSET_MS)
 }
 
 /**
- * 5. Morning summary: the tasks planned for today, once a day from 08:00 Nha Trang time.
- * Nothing is sent on a day without tasks.
+ * 5. Morning summary: the tasks planned for tomorrow, once a day from 08:00 of the person's own morning.
+ * Comes only when the switch in Settings is on; nothing is sent when tomorrow has no tasks.
  */
 async function checkMorningSummary(env, chatId, force = false) {
   const now = new Date();
@@ -4277,13 +4356,14 @@ async function checkMorningSummary(env, chatId, force = false) {
   if (!force && (await getSetting(env, 'last_morning_date')) === today) return null;
   await setSetting(env, 'last_morning_date', today);
 
+  const tomorrow = localDateOf(now.getTime() + 24 * 3600 * 1000, env.tzMs);
   const res = await env.DB.prepare(
     `SELECT * FROM tasks
      WHERE user_id = ? AND is_completed = 0 AND due_datetime IS NOT NULL
        AND (needs_review IS NULL OR needs_review = 0) AND (possible_duplicate IS NULL OR possible_duplicate = 0)
        AND CASE WHEN is_date_only = 1 THEN date(due_datetime) ELSE date(due_datetime, '${env.tzSql}') END = ?
      ORDER BY is_date_only DESC, due_datetime ASC`
-  ).bind(env.uid, today).all();
+  ).bind(env.uid, tomorrow).all();
   const tasks = res.results || [];
   if (!tasks.length) return null;
 
@@ -4295,12 +4375,14 @@ async function checkMorningSummary(env, chatId, force = false) {
     }
     return `${time.padEnd(9)}${stripEmojis(t.title)}`;
   });
-  const msg = `<i>${escapeHtml(tgDayLabel(today))}</i>\n` +
-    `<blockquote><b>На сегодня ${tasks.length} ${plural(tasks.length, 'задача', 'задачи', 'задач')}</b></blockquote>\n` +
+  const msg = `<i>${escapeHtml(tgDayLabel(tomorrow))}</i>\n` +
+    `<blockquote><b>На завтра ${tasks.length} ${plural(tasks.length, 'задача', 'задачи', 'задач')}</b></blockquote>\n` +
     `<pre>${rows.map(escapeHtml).join('\n')}</pre>`;
   const markup = { inline_keyboard: [[{ text: 'Открыть задачи', web_app: { url: appOpenUrl(env) } }]] };
   const sent = await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, msg, markup, 'HTML');
-  return sent?.ok ? { date: today, count: tasks.length } : null;
+  if (sent?.ok) return { date: today, count: tasks.length };
+  await setSetting(env, 'last_morning_date', '');   // not delivered: the next pass tries again, the day's summary is not lost
+  return null;
 }
 
 async function getMorningEnabled(env) {
@@ -4654,7 +4736,8 @@ const DEFAULT_DAILY_LIMIT = { VND: 200000, RUB: 2000, USD: 30, KZT: 10000, UAH: 
 async function getDailyLimit(env) {
   const own = DEFAULT_DAILY_LIMIT[String(env.DEFAULT_CURRENCY || 'VND').toUpperCase()];
   let amountVnd = own ? Math.round(convertCurrency(own, String(env.DEFAULT_CURRENCY || 'VND').toUpperCase(), 'VND')) : DEFAULT_DAILY_LIMIT_VND;
-  let enabled = true;
+  // New people start with the limit off (they turn it on in Settings); the owner keeps the old default (on)
+  let enabled = env.uid === OWNER_ID;
   try {
     const res = await env.DB.prepare("SELECT key, value FROM settings WHERE user_id = ? AND key IN ('daily_limit_vnd', 'daily_limit_off')").bind(env.uid).all();
     for (const r of res?.results || []) {
@@ -4739,12 +4822,12 @@ async function saveSettings(request, env, url) {
   }
   if (body.timezone !== undefined) {
     if (!isValidTimezone(body.timezone) || (env.uid !== OWNER_ID && !TIMEZONE_IDS.includes(String(body.timezone)))) return errorResponse('Unknown time zone', 400);
-    // The day limit is counted by the person's own midnight, so moving the zone after the first run would reset it
-    // at will. A client picks the zone once (first run, before any record); later only the owner can change it.
-    if (env.uid !== OWNER_ID && String(body.timezone) !== env.USER_TIMEZONE) {
-      const started = (await getSetting(env, 'setup_done')) === '1' ||
-        !!(await env.rawDB.prepare('SELECT daily_date FROM users WHERE id = ?').bind(env.uid).first())?.daily_date;
-      if (started) return jsonResponse({ ok: false, code: 'tz_locked', error: 'Часовой пояс после первого запуска не меняется. Напишите в поддержку.' }, 403);
+    // The day limit is counted by the person's own midnight, so moving the zone back and forth would reset it at will.
+    // A client may change the zone in Settings, but not more often than once a day (the owner: any time).
+    if (env.uid !== OWNER_ID && String(body.timezone) !== env.USER_TIMEZONE && (await getSetting(env, 'setup_done')) === '1') {
+      const last = Number(await getSetting(env, 'tz_changed_at')) || 0;
+      if (Date.now() - last < TZ_CHANGE_COOLDOWN_MS) return jsonResponse({ ok: false, code: 'tz_cooldown', error: 'Город можно менять не чаще раза в сутки. Попробуйте завтра.' }, 429);
+      await upsert('tz_changed_at', String(Date.now()));
     }
     await env.rawDB.prepare('UPDATE users SET timezone = ? WHERE id = ?').bind(String(body.timezone), env.uid).run();
     env.USER_TIMEZONE = String(body.timezone);

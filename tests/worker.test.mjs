@@ -296,6 +296,27 @@ test('debts: a spoken debt is an expense with the debt mark, outside the day tot
   assert.equal(rows(env, 'finances').reduce((s, r) => s + r.debt_paid, 0), 150000, 'an unknown person changes nothing');
 });
 
+test('debts: the reply says "Долг", not "Заметка"; one person keeps the shortest spelling', async () => {
+  const env = makeEnv();
+  env.DB.raw.exec("insert into finances(amount,currency,category,title,is_debt) values (1000,'VND','other','Арбуз',1),(2000,'VND','other','Арбуз дог',1)");
+  const r = await say(env, '52 тысячи, арбуз, долг.', [{ type: 'note', data: { title: 'x', content: 'x' } }]);
+  assert.match(r.screen_notification, /^Долг: Арбуз 52\s000 VND$/);
+  assert.match(r.voice_reply, /^Долг: Арбуз/);
+  assert.equal(rows(env, 'finances').at(-1).title, 'Арбуз');
+  await say(env, 'Арбузу 5 тысяч долг', []);
+  assert.equal(rows(env, 'finances').at(-1).title, 'Арбуз');
+
+  env.DB.raw.exec("insert into finances(amount,currency,category,title,is_debt) values (3000,'VND','other','Тест Арбуз',1)");
+  await say(env, 'Тест. Cactus должен мне 7000.', []);
+  assert.equal(rows(env, 'finances').at(-1).title, 'Тест Cactus');    // another person, not "Тест Арбуз"
+});
+
+test('category: an everyday word beats the LLM (Gemini filed a taxi under services)', async () => {
+  const env = makeEnv();
+  await say(env, '40 тысяч такси в Камрань', [fin(40000, { title: 'Такси в Камрань', category: 'services' })]);
+  assert.equal(rows(env, 'finances')[0].category, 'car');
+});
+
 test('debts: "я должен" is a separate list; my repayments do not touch debts owed to me', async () => {
   const env = makeEnv();
   await say(env, 'Арбуз должен мне 100 тысяч', []);
@@ -361,18 +382,18 @@ test('debts: the checkbox on an expense, partial and full return, unchecking rem
   assert.equal((await call(env, 'POST', '/api/debts/999/pay', { all: true })).status, 404);
 });
 
-test('morning summary: lists today\'s tasks, skips done and other days, sends nothing on an empty day', async () => {
+test('morning summary: lists tomorrow\'s tasks, skips done and other days, sends nothing when tomorrow is empty', async () => {
   const env = makeEnv();
   env.DB.raw.exec("insert into settings(key,value) values ('telegram_chat_id','42')");
   const today = new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 10);
   const tomorrow = new Date(Date.now() + 31 * 3600000).toISOString().slice(0, 10);
-  env.DB.raw.exec(`insert into tasks(title,due_datetime,is_date_only) values ('Оплатить интернет','${today} 00:00:00',1),('Другой день','${tomorrow} 00:00:00',1)`);
-  env.DB.raw.exec(`insert into tasks(title,due_datetime,is_completed) values ('Сделано','${today} 03:00:00',1)`);
-  env.DB.raw.exec("insert into tasks(title,due_datetime) values ('Звонок', datetime('" + today + " 02:30:00'))");  // 09:30 Nha Trang
+  env.DB.raw.exec(`insert into tasks(title,due_datetime,is_date_only) values ('Оплатить интернет','${tomorrow} 00:00:00',1),('Другой день','${today} 00:00:00',1)`);
+  env.DB.raw.exec(`insert into tasks(title,due_datetime,is_completed) values ('Сделано','${tomorrow} 03:00:00',1)`);
+  env.DB.raw.exec("insert into tasks(title,due_datetime) values ('Звонок', datetime('" + tomorrow + " 02:30:00'))");  // 09:30 Nha Trang
   tgSent.length = 0;
   const r = await json(await call(env, 'GET', '/api/cron-trigger?morning=1'));
   assert.equal(r.result.morningSent.count, 2);
-  const card = tgSent.find(m => m && /На сегодня 2 задачи/.test(m.text || ''));
+  const card = tgSent.find(m => m && /На завтра 2 задачи/.test(m.text || ''));
   assert.ok(card);
   assert.match(card.text, /Оплатить интернет/);
   assert.match(card.text, /09:30\s+Звонок/);
@@ -383,7 +404,7 @@ test('morning summary: lists today\'s tasks, skips done and other days, sends no
   tgSent.length = 0;
   const e = await json(await call(empty, 'GET', '/api/cron-trigger?morning=1'));
   assert.equal(e.result.morningSent, null);
-  assert.equal(tgSent.some(m => m && /На сегодня/.test(m.text || '')), false);
+  assert.equal(tgSent.some(m => m && /На завтра/.test(m.text || '')), false);
 });
 
 test('morning summary can be switched off in settings', async () => {
@@ -866,7 +887,7 @@ for (const phrase of [
 
 test('STT silence hallucinations are not saved', async () => {
   const env = makeEnv({ GROQ_API_KEY: 'g' });
-  for (const heard of ['Субтитры сделал DimaTorzok', 'а']) {
+  for (const heard of ['Субтитры сделал DimaTorzok', 'а', 'Расходы и долги: еда, вода, кофе, такси']) {
     const prev = globalThis.fetch;
     globalThis.fetch = async (url, opts) => String(url).includes('audio/transcriptions')
       ? new Response(JSON.stringify({ text: heard }), { status: 200 })
@@ -876,6 +897,91 @@ test('STT silence hallucinations are not saved', async () => {
     assert.equal(r.ok, false);
   }
   assert.equal(rows(env, 'notes').length + rows(env, 'finances').length, 0);
+});
+
+test('STT hint: learned dictionary words stay out of it ("dog" turned "долг" into "дог")', async () => {
+  const env = makeEnv({ GROQ_API_KEY: 'g' });
+  env.DB.raw.exec("insert into vocabulary(word, translation, user_id) values ('dog', 'собака', 1)");
+  let hint = null;
+  const prev = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    if (!String(url).includes('audio/transcriptions')) return prev(url, opts);
+    hint = opts.body.get('prompt');
+    return new Response(JSON.stringify({ text: '12000 еда' }), { status: 200 });
+  };
+  aiReply = { actions: [fin(12000)] };
+  try {
+    await call(env, 'POST', '/api/voice-hook', { audio: Buffer.from('fake-audio').toString('base64') });
+  } finally { globalThis.fetch = prev; }
+  assert.match(hint, /долг/);
+  assert.doesNotMatch(hint, /dog/);
+  assert.doesNotMatch(hint, /\d/);       // an echo on silence must not look like an expense
+});
+
+test('listening trial: for the owner Gemini hears the audio on the side; the record, a failure and other people are untouched', async () => {
+  const hear = (geminiStatus) => {
+    const prev = globalThis.fetch;
+    const audioCalls = [];
+    globalThis.fetch = async (url, opts) => {
+      if (String(url).includes('audio/transcriptions')) return new Response(JSON.stringify({ text: '12000 еда' }), { status: 200 });
+      if (String(url).includes('generativelanguage') && String(opts?.body).includes('inlineData')) {
+        assert.doesNotMatch(opts.body, /Расходы и долги/);        // Gemini wrote a hint back into its transcript
+        audioCalls.push(JSON.parse(opts.body).contents[0].parts[0].inlineData.mimeType);
+        return geminiStatus === 200
+          ? new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: 'другие слова 99000' }] } }] }), { status: 200 })
+          : new Response('nope', { status: geminiStatus });
+      }
+      return prev(url, opts);
+    };
+    return { audioCalls, restore: () => { globalThis.fetch = prev; } };
+  };
+  const audio = { audio: Buffer.from('fake-audio').toString('base64'), mime: 'audio/m4a' };
+  const trialLog = (env) => rows(env, 'request_logs').filter(r => r.endpoint === '/api/voice-hook/stt-gemini');
+  aiReply = { actions: [fin(12000)] };
+
+  const env = makeEnv({ GROQ_API_KEY: 'g' });
+  let h = hear(200);
+  try { await call(env, 'POST', '/api/voice-hook', audio); } finally { h.restore(); }
+  assert.deepEqual(h.audioCalls, ['audio/mp4']);
+  assert.match(trialLog(env)[0].body_preview, /другие слова 99000/);
+  assert.equal(rows(env, 'finances')[0].amount, 12000);          // the record stays Whisper's
+
+  const failed = makeEnv({ GROQ_API_KEY: 'g' });
+  h = hear(400);
+  try { await call(failed, 'POST', '/api/voice-hook', audio); } finally { h.restore(); }
+  assert.match(trialLog(failed)[0].body_preview, /ошибка 400/);
+  assert.equal(rows(failed, 'finances').length, 1);
+
+  const b = twoUsers();
+  b.GROQ_API_KEY = 'g';
+  h = hear(200);
+  try { await asB(b, 'POST', '/api/voice-hook', audio); } finally { h.restore(); }
+  assert.deepEqual(h.audioCalls, []);                             // never a client's voice
+});
+
+test('currency: a foreign currency the user never said goes to the default one and to review', async () => {
+  const env = makeEnv();
+  await say(env, '70 тысяч долл карбуз', [fin(70000, { currency: 'USD', title: 'Карбуз', category: 'other' })]);
+  const guessed = rows(env, 'finances')[0];
+  assert.equal(guessed.currency, 'VND');
+  assert.equal(guessed.needs_review, 1);
+  for (const [phrase, currency] of [['20 долларов кофе', 'USD'], ['$20 кофе', 'USD'], ['500 р кофе', 'RUB']]) {
+    const said = await say(makeEnv(), phrase, [fin(phrase.includes('500') ? 500 : 20, { currency, title: 'Кофе' })]);
+    assert.match(said.screen_notification, new RegExp(currency));
+  }
+});
+
+test('LLM: why a provider refused lands in request_logs, without the key', async () => {
+  const env = makeEnv({ GEMINI_API_KEY: 'SECRETKEY123' });
+  geminiMode = 'down';
+  try {
+    await say(env, 'запиши идею', [{ type: 'note', data: { category: 'idea', title: 'Идея', content: 'идея' } }]);
+  } finally { geminiMode = 'ok'; }
+  const log = rows(env, 'request_logs').find(r => r.endpoint === '/api/voice-hook/llm');
+  assert.match(log.body_preview, /\(500\): boom/);
+  assert.doesNotMatch(log.body_preview, /SECRETKEY123/);
+  await say(env, 'запиши идею номер два', [{ type: 'note', data: { category: 'idea', title: 'Идея', content: 'идея' } }]);
+  assert.equal(rows(env, 'request_logs').filter(r => r.endpoint === '/api/voice-hook/llm').length, 1);   // a healthy answer adds nothing
 });
 
 test('request_logs table exists and is written', async () => {
@@ -1210,6 +1316,7 @@ test('access: a new Telegram user can look around but not record until they have
   env.DB.raw.prepare('update users set token = ? where id = ?').run('h:' + createHash('sha256').update('new-user-token-0123456789abcdef').digest('hex'), row.id);
   const denied = await call(env, 'POST', '/api/voice-hook', { text: 'кофе 1000' }, { 'x-token': 'new-user-token-0123456789abcdef' });
   assert.equal(denied.status, 403);
+  assert.equal((await json(denied)).code, 'subscription_required');   // the Mini App shows a toast for this, not the "open from Telegram" screen
   // subscription on, then it works; an expired subscription closes it again
   env.DB.raw.prepare("update users set status = 'active', sub_until = datetime('now', '+5 days') where id = ?").run(row.id);
   assert.equal((await call(env, 'POST', '/api/voice-hook', { text: 'кофе 1000' }, { 'x-token': 'new-user-token-0123456789abcdef' })).status, 200);
@@ -1269,7 +1376,7 @@ test('cron: two people due at the same minute each get only their own reminder, 
 
 test('cron: morning summary comes at 8:00 of each person\'s own morning', async () => {
   const env = cronPeople();
-  env.DB.raw.exec(`insert into tasks(title,due_datetime,is_date_only,user_id) values ('дело-А','2026-11-02 00:00:00',1,1), ('дело-Б','2026-11-02 00:00:00',1,2)`);
+  env.DB.raw.exec(`insert into tasks(title,due_datetime,is_date_only,user_id) values ('дело-А','2026-11-03 00:00:00',1,1), ('дело-Б','2026-11-03 00:00:00',1,2)`);
   env.DB.raw.exec('update tasks set reminded = 3');   // SQLite keeps the real clock: only the summary is under test here
   try {
     atUtc('2026-11-02T01:00:00Z');                       // 08:00 Nha Trang, 04:00 Moscow
@@ -1286,6 +1393,7 @@ test('cron: morning summary comes at 8:00 of each person\'s own morning', async 
 
 test('cron: the evening digest is in the person\'s currency and day, with a limit of their own', async () => {
   const env = cronPeople();
+  env.DB.raw.exec(`insert into settings(key,value,user_id) values ('daily_limit_off','0',2)`);   // new people start with the limit off; B turned it on
   env.DB.raw.exec(`insert into finances(amount,currency,category,title,created_at,user_id) values (700,'RUB','food','Кофе','2026-11-02 10:00:00',2), (50000,'VND','food','Фо','2026-11-02 03:00:00',1)`);
   try {
     atUtc('2026-11-02T21:00:00Z');                       // 00:00 Moscow (Nov 3): B's day Nov 2 is over; 04:00 in Nha Trang: nothing yet
@@ -1346,13 +1454,38 @@ test('currency: what B dictates is saved in B\'s own currency, small amounts inc
   assert.equal(one(env, "select currency c from finances where user_id = 1 and amount = 45000").c, 'VND');
 });
 
+test('cron: with the Settings switch off no morning summary comes, even with tasks for tomorrow', async () => {
+  const env = cronPeople();
+  env.DB.raw.exec(`insert into tasks(title,due_datetime,is_date_only,reminded,user_id) values ('дело-А','2026-11-03 00:00:00',1,3,1)`);
+  env.DB.raw.exec(`insert into settings(key,value,user_id) values ('morning_off','1',1)`);
+  try {
+    atUtc('2026-11-02T01:00:00Z');
+    assert.doesNotMatch(to(await tickCron(env), 42).map(m => m.text).join(), /дело-А/);
+  } finally { mock.timers.reset(); }
+});
+
+test('cron: a morning summary Telegram did not take is tried again, not lost for the day', async () => {
+  const env = cronPeople();
+  env.DB.raw.exec(`insert into tasks(title,due_datetime,is_date_only,reminded,user_id) values ('дело-А','2026-11-03 00:00:00',1,3,1)`);
+  const prev = globalThis.fetch;
+  try {
+    atUtc('2026-11-02T01:00:00Z');
+    globalThis.fetch = async (url, opts) => String(url).includes('api.telegram.org')
+      ? new Response(JSON.stringify({ ok: false }), { status: 500 })
+      : prev(url, opts);
+    await tickCron(env);
+    globalThis.fetch = prev;
+    assert.match((await tickCron(env)).filter(m => m?.chat_id == 42).map(m => m.text).join(), /дело-А/);
+  } finally { globalThis.fetch = prev; mock.timers.reset(); }
+});
+
 test('cron: a date-only task pings at 07:00 of the person\'s own morning, not at the same UTC moment for everybody', async () => {
   const env = cronPeople();
   const hourAgo = new Date(Date.now() - 3600000).toISOString().slice(0, 19).replace('T', ' ');
   env.DB.raw.prepare("insert into tasks(title,due_datetime,is_date_only,user_id) values ('дата-А', ?, 1, 1), ('дата-Б', ?, 1, 2)").run(hourAgo, hourAgo);
   const sent = await tickCron(env);
   assert.match(to(sent, 42).map(m => m.text).join(), /дата-А/);            // Nha Trang: the stored moment is already past
-  assert.equal(to(sent, 77).length, 0);                                    // Moscow: 07:00 local is 4 hours after the stored moment
+  assert.doesNotMatch(to(sent, 77).map(m => m.text).join(), /дата-Б/);     // Moscow: 07:00 local is 4 hours after the stored moment (other cards depend on the real hour)
 });
 
 // ---------- stage 4: payments with Telegram Stars ----------
@@ -2124,19 +2257,21 @@ test('payment: a trial gets only the last reminder (not one on its first day)', 
 });
 
 // ---------- stage 9: money protection ----------
-test('security: a client cannot move the time zone after the first run (the day limit would reset); the owner can', async () => {
+test('security: a client can change the time zone in Settings, but only once a day (the day limit would reset); the owner any time', async () => {
   const env = buyer();
-  assert.equal((await asB(env, 'PUT', '/api/settings', { timezone: 'Asia/Almaty', setup_done: true })).status, 200);
-  const moved = await asB(env, 'PUT', '/api/settings', { timezone: 'Europe/Moscow' });
-  assert.equal(moved.status, 403);
-  assert.equal((await json(moved)).code, 'tz_locked');
-  assert.equal(one(env, 'select timezone t from users where id = 2').t, 'Asia/Almaty');
-  assert.equal((await asB(env, 'PUT', '/api/settings', { timezone: 'Asia/Almaty', default_currency: 'KZT' })).status, 200);   // same value: fine
+  assert.equal((await asB(env, 'PUT', '/api/settings', { timezone: 'Asia/Almaty', setup_done: true })).status, 200);   // first run
+  assert.equal((await asB(env, 'PUT', '/api/settings', { timezone: 'Europe/Moscow' })).status, 200);                  // first change from Settings
+  assert.equal(one(env, 'select timezone t from users where id = 2').t, 'Europe/Moscow');
+  const again = await asB(env, 'PUT', '/api/settings', { timezone: 'Asia/Almaty' });
+  assert.equal(again.status, 429);
+  assert.equal((await json(again)).code, 'tz_cooldown');
+  assert.equal(one(env, 'select timezone t from users where id = 2').t, 'Europe/Moscow');
+  assert.equal((await asB(env, 'PUT', '/api/settings', { timezone: 'Europe/Moscow', default_currency: 'KZT' })).status, 200);   // same zone: fine
   assert.equal((await call(env, 'PUT', '/api/settings', { timezone: 'Asia/Bangkok' })).status, 200);                      // owner
-  // setup never finished but a record already counted: also locked
+  // a record came before the first-run questions were answered: the first-run save must still work (it used to be a 403 that showed the "open from Telegram" screen)
   const env2 = buyer();
   env2.DB.raw.exec("update users set daily_date = '2026-11-02', daily_count = 1 where id = 2");
-  assert.equal((await asB(env2, 'PUT', '/api/settings', { timezone: 'Asia/Almaty' })).status, 403);
+  assert.equal((await asB(env2, 'PUT', '/api/settings', { timezone: 'Asia/Almaty', default_currency: 'KZT', setup_done: true })).status, 200);
 });
 
 test('security: oversized requests are refused, a guessing robot and a flood get 429', async () => {

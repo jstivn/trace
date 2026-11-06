@@ -347,6 +347,7 @@
     .sheet-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); padding: var(--s3) var(--s2) var(--s2) var(--s5); }
     .sheet-head h2 { font-size: var(--text-h3); font-weight: 600; line-height: 1.25; }
     .sheet-body { overflow-y: auto; padding: var(--s2) var(--s5) var(--s4); }
+    .steps li { min-width: 0; overflow-wrap: anywhere; }   /* a long link must wrap, not run off the screen */
     .sheet-foot { display: flex; align-items: center; gap: var(--s2); padding: var(--s3) var(--s5) calc(var(--s3) + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
     .sheet-foot .spacer { flex: 1; }
     .confirm-text { flex: 1 1 100%; font-size: var(--text-secondary); font-weight: 500; }
@@ -773,7 +774,7 @@
           throw new SubscriptionError(data.error || 'subscription_required');
         }
       }
-      if (res.status === 401 || res.status === 403) {
+      if (res.status === 401) {
         showGate();
         throw new AuthError('auth');
       }
@@ -939,7 +940,7 @@
           ? '<span class="over">сверх на ' + esc(money(total - limit, S.currency)) + '</span>'
           : 'осталось ' + esc(money(limit - total, S.currency)));
       } else {
-        $('dayCaption').innerHTML = '<button type="button" class="caption-btn off" data-action="settings">Дневной лимит выключен</button>';
+        $('dayCaption').innerHTML = '';
       }
       renderWeek(key);
       renderSections(key);
@@ -1048,7 +1049,7 @@
       const items = buildFeed(key);
       if (!items.length) {
         frame.innerHTML = '<div style="margin-top:var(--s5)">' + stateHtml(key === todayKey() ? 'Сегодня пока пусто' : 'За этот день записей нет',
-          'Скажите или напишите внизу, что произошло: «кофе 45к», «позвонить Ахмеду в 10». Запись появится здесь.',
+          'Скажите или напишите внизу, что произошло: «кофе 250», «позвонить маме в 10». Запись появится здесь.',
           '<button type="button" class="btn primary" data-action="focus-capture">Написать запись</button>') + '</div>';
         return;
       }
@@ -1243,7 +1244,7 @@
       const list = S.tasks || [];
       if (!list.length) {
         frame.innerHTML = S.taskFilter === 'active'
-          ? stateHtml('Активных задач нет', 'Напишите или скажите задачу внизу, например «завтра в 10 позвонить Ахмеду». Срок и напоминание поставятся сами.',
+          ? stateHtml('Активных задач нет', 'Напишите или скажите задачу внизу, например «завтра в 10 позвонить маме». Срок и напоминание поставятся сами.',
               '<button type="button" class="btn primary" data-action="new-task">Добавить задачу</button>')
           : stateHtml('Выполненных задач пока нет', 'Отмечайте задачи кружком слева, и они появятся здесь.',
               '<button type="button" class="btn" data-action="task-filter" data-value="active">Показать активные</button>');
@@ -1337,7 +1338,7 @@
         body:
           '<div class="field"><label for="tTitle">Что сделать</label>' +
             '<input id="tTitle" name="title" type="text" value="' + esc(t.title) + '" data-validate="required" required autocomplete="off">' +
-            '<p class="error" id="tTitle-error" hidden>Опишите задачу, например «Позвонить Ахмеду»</p></div>' +
+            '<p class="error" id="tTitle-error" hidden>Опишите задачу, например «Позвонить маме»</p></div>' +
           '<div class="row2">' +
             '<div class="field"><label for="tDate">Срок</label><input id="tDate" name="date" type="date" value="' + esc(due ? due.key : '') + '"></div>' +
             '<div class="field"><label for="tTime">Время</label><input id="tTime" name="time" type="time" value="' + esc(due && !due.dateOnly ? due.time : '') + '"></div>' +
@@ -1868,7 +1869,7 @@
       openSheet({
         title: 'Добро пожаловать', kind: 'first-run', primary: 'Продолжить',
         body:
-          '<p class="hint" style="margin:0 0 var(--s4)">Два вопроса, чтобы траты считались в вашей валюте, а день менялся в полночь по вашему времени. Позже это не изменить без обращения в поддержку.</p>' +
+          '<p class="hint" style="margin:0 0 var(--s4)">Два вопроса, чтобы траты считались в вашей валюте, а день менялся в полночь по вашему времени. Потом это можно поменять в Настройках.</p>' +
           '<div class="field"><label for="frCur">Валюта</label><select id="frCur" name="currency">' +
             (s.supported_currencies || []).map(c => '<option value="' + esc(c) + '"' + (c === cur ? ' selected' : '') + '>' + esc(CURRENCY_NAMES[c] || c) + '</option>').join('') +
           '</select></div>' +
@@ -2055,8 +2056,17 @@
           '<label class="switch-row"><span>Следить за лимитом трат</span><input type="checkbox" role="switch" name="limitOn" data-change="limit-toggle"' + (s.limit_enabled ? ' checked' : '') + '></label>' +
           '<div class="field" id="limitField"' + (s.limit_enabled ? '' : ' hidden') + '><label for="sLimit">Сколько в день, ' + esc(CURRENCY_SIGNS[cur] || cur) + '</label>' +
             '<input id="sLimit" name="limit" class="amount" type="text" inputmode="decimal" value="' + esc(shown) + '" data-validate="amount" required autocomplete="off">' +
-            '<p class="error" id="sLimit-error" hidden>Введите сумму больше нуля, например 200000</p>' +
+            '<p class="error" id="sLimit-error" hidden>Введите сумму больше нуля, например 2000</p>' +
             '<p class="hint">Дни сверх лимита подсвечиваются красным, а в итогах дня бот пишет, сколько осталось.</p></div>' +
+        '</div>' +
+        '<div class="settings-group"><h3>Валюта и город</h3>' +
+          '<div class="field"><label for="sCur">Моя валюта</label><select id="sCur" name="ownCur">' +
+            (s.supported_currencies || []).map(c => '<option value="' + esc(c) + '"' + (c === s.default_currency ? ' selected' : '') + '>' + esc(CURRENCY_NAMES[c] || c) + '</option>').join('') +
+          '</select></div>' +
+          '<div class="field"><label for="sTz">Мой город</label><select id="sTz" name="ownTz">' +
+            (s.timezones || []).map(t => '<option value="' + esc(t.id) + '"' + (t.id === s.timezone ? ' selected' : '') + '>' + esc(t.label + ', ' + offsetLabel(t.offset_min)) + '</option>').join('') +
+          '</select>' +
+          '<p class="hint">От города зависит, когда день меняется на новый. Город можно менять раз в сутки.</p></div>' +
         '</div>' +
         '<div class="settings-group"><h3 id="sVocabLabel">Слова в Telegram</h3>' +
           '<div class="radio-chips" role="radiogroup" aria-labelledby="sVocabLabel">' +
@@ -2065,8 +2075,8 @@
           '<p class="hint">Бот присылает слово для повторения с 9:00 до 22:00. Раз в день — в 10:00, два раза — в 10:00 и 18:00.</p>' +
         '</div>' +
         '<div class="settings-group"><h3>Утренняя сводка</h3>' +
-          '<label class="switch-row"><span>Присылать задачи на сегодня</span><input type="checkbox" role="switch" name="morning"' + (s.morning_summary !== false ? ' checked' : '') + '></label>' +
-          '<p class="hint">Одно сообщение в Telegram утром, после 8:00. В день без задач ничего не приходит.</p>' +
+          '<label class="switch-row"><span>Присылать задачи на завтра</span><input type="checkbox" role="switch" name="morning"' + (s.morning_summary !== false ? ' checked' : '') + '></label>' +
+          '<p class="hint">Одно сообщение в Telegram утром, после 8:00. Если на завтра задач нет, ничего не приходит.</p>' +
         '</div>' +
         '<div class="settings-group"><h3>Долги</h3>' +
           '<div class="actions" style="display:flex; gap:8px; flex-wrap:wrap">' +
@@ -2094,7 +2104,14 @@
         const on = f.limitOn.checked;
         const payload = { limit_enabled: on, currency: cur, vocab_reminders: f.vocab.value || 'daily', morning_summary: f.morning.checked };
         if (on) payload.limit_amount = parseFloat(String(f.limit.value).replace(/\s/g, '').replace(',', '.'));
-        await api('/api/settings', { method: 'PUT', body: payload });
+        if (f.ownCur && f.ownTz) {
+          if (f.ownCur.value !== s.default_currency) payload.default_currency = f.ownCur.value;
+          if (f.ownTz.value !== s.timezone) payload.timezone = f.ownTz.value;
+        }
+        const r = await api('/api/settings', { method: 'PUT', body: payload });
+        S.profile = r;
+        if (Number.isFinite(r.tz_offset_min)) TZ_OFFSET_MS = r.tz_offset_min * 60000;
+        if (payload.default_currency) { S.currency = payload.default_currency; $('currencySel').value = S.currency; savePrefs(); }
         toast('Настройки сохранены');
         refresh();
       };
