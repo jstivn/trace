@@ -359,6 +359,88 @@ test('top words: 1000 unique words in 50 groups of 20; progress keeps the best t
   assert.equal((await call(env, 'POST', '/api/top-words/progress', { group: 1, score: 150 })).status, 400);
 });
 
+// Every way of saying "take it off the debt" lowers the debt; none of them may open a new one or become a note
+for (const [phrase, arbuzPaid, dimaPaid] of [
+  ['Арбуз погасил долг 30 тысяч', 30000, 0],
+  ['Арбуз отдал мне 30к', 30000, 0],
+  ['вычти 30 тысяч из долга Арбуза', 30000, 0],
+  ['минус 30 тысяч из долга Арбуза', 30000, 0],
+  ['спиши с Арбуза 30 тысяч', 30000, 0],
+  ['долг Арбуза уменьши на 30 тысяч', 30000, 0],
+  ['Арбуз перевёл 30 тысяч в счёт долга', 30000, 0],
+  ['Арбуз вернул тридцать тысяч', 30000, 0],
+  ['Арбуз вернул весь долг', 100000, 0],
+  ['Арбуз закрыл долг', 100000, 0],
+  ['Арбуз больше ничего не должен', 100000, 0],
+  ['Арбуз вернул половину', 50000, 0],
+  ['Арбуз вернул 500 тысяч', 100000, 0],          // more than owed: the debt is closed, not negative
+  ['вернул Диме 80 тысяч', 0, 80000],             // nobody said whose debt: the open debt itself tells
+  ['я погасил долг Диме 50 тысяч', 0, 50000],
+  ['я вернул Диме весь долг', 0, 200000]
+]) {
+  test(`debts: "${phrase}" takes money off the debt`, async () => {
+    const env = makeEnv();
+    await say(env, 'Арбуз должен мне 100 тысяч', []);
+    await say(env, 'я должен Диме 200 тысяч', []);
+    // the model answers nothing useful, or wrongly opens a new debt: the code decides
+    const r = await say(env, phrase, [{ type: 'debt', data: { person: 'Арбуз', amount: 30000, currency: 'VND', repay: false } }]);
+    const f = rows(env, 'finances');
+    assert.equal(f.length, 2, 'no new record');
+    assert.deepEqual(f.map(x => x.debt_paid), [arbuzPaid, dimaPaid]);
+    assert.equal(rows(env, 'notes').length, 0);
+    assert.match(r.screen_notification, /^Возврат долга: /);
+    assert.match(r.screen_notification, /осталось|долг закрыт/);
+  });
+}
+
+test('debts: the reply to a repayment says what is left; an unknown person is named and nothing changes', async () => {
+  const env = makeEnv();
+  await say(env, 'Арбуз должен мне 100 тысяч', []);
+  let r = await say(env, 'Арбуз вернул 30 тысяч', []);
+  assert.match(r.screen_notification, /^Возврат долга: Арбуз 30\s000 VND, осталось 70\s000$/);
+  r = await say(env, 'Арбуз вернул 70 тысяч', []);
+  assert.match(r.screen_notification, /^Возврат долга: Арбуз 70\s000 VND, долг закрыт$/);
+  r = await say(env, 'Незнакомец вернул 10 тысяч', []);
+  assert.match(r.screen_notification, /^Открытый долг не найден: Незнакомец$/);
+  assert.equal(rows(env, 'finances').length, 1);
+  // not about money, and ordinary expenses with the same words, are left alone
+  await say(env, 'Арбуз вернул книгу', []);
+  await say(env, 'минус 30 тысяч', [fin(30000)]);
+  await say(env, 'арбуз 30 тысяч', [fin(30000, { title: 'Арбуз' })]);
+  assert.equal(rows(env, 'finances').filter(x => x.is_debt).length, 1);
+  assert.equal(rows(env, 'finances')[0].debt_paid, 100000);
+});
+
+test('debts: a phrase the code reads by itself never goes to the models (instant, works with every provider down)', async () => {
+  const env = makeEnv({ GEMINI_API_KEY: '' });   // no key at all: the model route would fail
+  const before = fetchLog.length;
+  await say(env, 'Арбуз должен мне 100 тысяч', []);
+  const r = await say(env, 'Арбуз вернул 30 тысяч', []);
+  assert.match(r.screen_notification, /осталось 70\s000/);
+  assert.equal(fetchLog.slice(before).filter(u => /generativelanguage|gateway\.ai|groq/.test(u)).length, 0);
+});
+
+test('debts: a repayment without a named currency goes to the currency the person owes in', async () => {
+  const env = makeEnv();
+  await say(env, 'Арбуз должен мне 100 долларов', []);
+  const r = await say(env, 'Арбуз вернул 40', []);
+  assert.equal(rows(env, 'finances')[0].debt_paid, 40);
+  assert.match(r.screen_notification, /40 USD, осталось 60/);
+  // a named currency that he does not owe in changes nothing
+  await say(env, 'Арбуз вернул 10 рублей', []);
+  assert.equal(rows(env, 'finances')[0].debt_paid, 40);
+});
+
+test('debts: the model\'s own "вернул весь долг" (all: true, no amount) closes the debt', async () => {
+  const env = makeEnv();
+  await say(env, 'Арбуз должен мне 100 тысяч', []);
+  // a long phrase the code parser leaves to the model
+  await say(env, 'слушай короче вчера вечером наконец-то приходил Арбуз и он закрыл передо мной свой долг полностью', [
+    { type: 'debt', data: { person: 'Арбуз', amount: null, repay: true, all: true } }
+  ]);
+  assert.equal(rows(env, 'finances')[0].debt_paid, 100000);
+});
+
 test('debts: an ordinary expense with the word "отдал" stays an expense', async () => {
   const env = makeEnv();
   await say(env, 'отдал 50к за обед', [fin(50000)]);

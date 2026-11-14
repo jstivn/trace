@@ -86,7 +86,7 @@ npm run dev
 npm test
 ```
 
-174 теста на `node:test`, вместо D1 стоит `node:sqlite`, `fetch` подменён. GitHub Actions запускает их при каждой отправке кода.
+195 тестов на `node:test`, вместо D1 стоит `node:sqlite`, `fetch` подменён. GitHub Actions запускает их при каждой отправке кода.
 
 ## Состояние
 
