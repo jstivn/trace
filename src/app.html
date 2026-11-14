@@ -641,12 +641,12 @@
     })();
 
     // ================= Constants =================
-    const TZ = 'Asia/Ho_Chi_Minh';
     let TZ_OFFSET_MS = 7 * 3600000; // replaced by the person's own zone once /api/settings answers (see loadProfile)
     const DAY_MS = 86400000;
 
     const CATEGORIES = { food: 'Еда', car: 'Транспорт', tech: 'IT и софт', services: 'Аренда и сервисы', other: 'Прочее' };
     const KIND_NAMES = { finances: 'Расход', tasks: 'Задача', notes: 'Заметка' };
+    const CURRENCIES = ['VND', 'USD', 'RUB', 'KZT', 'UAH', 'EUR', 'AED'];   // everything the server accepts
 
     const S = {
       view: 'day',
@@ -759,7 +759,8 @@
       if (key.slice(0, 4) !== t.slice(0, 4)) opts.year = 'numeric';
       return new Date(key + 'T00:00:00Z').toLocaleDateString('ru-RU', opts);
     }
-    function timeOf(d) { return d ? d.toLocaleTimeString('ru-RU', { timeZone: TZ, hour: '2-digit', minute: '2-digit' }) : ''; }
+    // Same offset as localKey and the task form use, so a shown time is the time that gets saved back
+    function timeOf(d) { return d ? new Date(d.getTime() + TZ_OFFSET_MS).toISOString().slice(11, 16) : ''; }
     function plural(n, one, few, many) {
       const m10 = n % 10, m100 = n % 100;
       if (m10 === 1 && m100 !== 11) return one;
@@ -1207,7 +1208,7 @@
               '<input id="fAmount" name="amount" class="amount" type="text" inputmode="decimal" value="' + esc(amount) + '" data-validate="amount" required>' +
               '<p class="error" id="fAmount-error" hidden>Введите сумму больше нуля, например 45000</p></div>' +
             '<div class="field"><label for="fCur">Валюта</label><select id="fCur" name="currency">' +
-              ['VND', 'USD', 'RUB', 'AED'].map(c => '<option' + (c === cur ? ' selected' : '') + '>' + c + '</option>').join('') +
+              CURRENCIES.map(c => '<option' + (c === cur ? ' selected' : '') + '>' + c + '</option>').join('') +
             '</select></div>' +
           '</div>' +
           '<div class="field"><label for="fTitle">На что</label><input id="fTitle" name="title" type="text" value="' + esc(tx.title || '') + '" autocomplete="off"></div>' +
@@ -2210,7 +2211,7 @@
               '<div class="field"><label for="rAmount">Сумма</label><input id="rAmount" name="amount" class="amount" type="text" inputmode="decimal" value="' + esc(r.amount || '') + '" data-validate="amount">' +
                 '<p class="error" id="rAmount-error" hidden>Введите сумму больше нуля, например 150000</p></div>' +
               '<div class="field"><label for="rCur">Валюта</label><select id="rCur" name="currency">' +
-                ['VND', 'USD', 'RUB', 'AED'].map(c => '<option' + (c === (r.currency || 'VND') ? ' selected' : '') + '>' + c + '</option>').join('') +
+                CURRENCIES.map(c => '<option' + (c === (r.currency || S.currency) ? ' selected' : '') + '>' + c + '</option>').join('') +
               '</select></div>' +
             '</div>' +
             '<div class="field"><span class="label" id="rCatLabel">Категория</span><div class="radio-chips" role="radiogroup" aria-labelledby="rCatLabel">' + cats + '</div></div>' +
