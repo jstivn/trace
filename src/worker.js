@@ -2126,8 +2126,20 @@ async function voiceTargetMatches(table, id, rawTranscript, env) {
  * Safety net for expense dictations the LLM filed as a note (or never saw because every provider failed):
  * a phrase made only of "<amount> <what>" parts is an expense, whatever the router said.
  */
-function enforceExpenseShape(classification, text, defaultCurrency) {
-  const debt = parseDebtPhrase(text, defaultCurrency);   // "Арбуз должен мне 100к" is a debt, never an expense
+/**
+ * One phrase -> a classification. A debt phrase the code can read by itself ("Арбуз вернул 30 тысяч") never goes to
+ * the models: the answer is instant, costs nothing and does not depend on any provider being up.
+ */
+async function routePhrase(input, text, env) {
+  const currency = env.DEFAULT_CURRENCY || 'VND';
+  const people = await openDebtPeople(env);
+  const debt = parseDebtPhrase(text, currency, people);
+  if (debt) return debt;
+  return enforceExpenseShape(await classifyWithGemini(input, env), text, currency, people);
+}
+
+function enforceExpenseShape(classification, text, defaultCurrency, people = []) {
+  const debt = parseDebtPhrase(text, defaultCurrency, people);   // "Арбуз должен мне 100к" is a debt, never an expense
   if (debt) return debt;
   const actions = Array.isArray(classification?.actions) && classification.actions.length > 0
     ? classification.actions
@@ -2443,13 +2455,13 @@ async function handleVoiceHook(request, env, opts = {}) {
     // Process text or audio through AI Router:
     const audioForAI = whisperText ? '' : audioBase64;
     const llmErrors = [];
-    const classification = enforceExpenseShape(await classifyWithGemini({
+    const classification = await routePhrase({
       text: correctedEffectiveText,
       audioBase64: audioForAI,
       mimeType: audioMime,
       vocabList,
       errors: llmErrors
-    }, env), effectiveText, env.DEFAULT_CURRENCY || 'VND');
+    }, effectiveText, env);
 
     // Why a provider refused, even when the next one saved the record: otherwise a dead Gemini stays invisible
     if (llmErrors.length > 0) {
@@ -2489,9 +2501,20 @@ async function handleVoiceHook(request, env, opts = {}) {
 
     let voiceReply = cleanVoice;
     let screenNotification = cleanScreen;
-    const debtLabel = (d = {}) => `${d.repay ? 'Возврат долга' : d.owe ? 'Мой долг' : 'Долг'}: ${d.person || ''} ${Number(d.amount || 0).toLocaleString('ru-RU')} ${d.currency || env.DEFAULT_CURRENCY || 'VND'}`;
+    const debtLabel = (d = {}) => {
+      const money = (n, c) => `${Number(n || 0).toLocaleString('ru-RU')} ${c || env.DEFAULT_CURRENCY || 'VND'}`;
+      if (!d.repay) return `${d.owe ? 'Мой долг' : 'Долг'}: ${d.person || ''} ${money(d.amount, d.currency)}`;
+      // a repayment says what is left, so the subtraction is visible at once
+      const parts = Array.isArray(d.parts) && d.parts.length ? d.parts : [{ currency: d.currency, applied: d.amount, left: d.left }];
+      return `Возврат долга: ${d.person || ''} ` + parts.map(p =>
+        `${money(p.applied, p.currency)}${p.left > 0 ? `, осталось ${Number(p.left).toLocaleString('ru-RU')}` : (p.left === 0 ? ', долг закрыт' : '')}`).join(' и ');
+    };
 
-    if (persistResult?.notFound) {
+    if (persistResult?.notFoundDebt) {
+      await giveBack();                       // nothing was changed: the place goes back
+      voiceReply = `Открытый долг не найден: ${persistResult.notFoundDebt}.`;
+      screenNotification = `Открытый долг не найден: ${persistResult.notFoundDebt}`;
+    } else if (persistResult?.notFound) {
       await giveBack();                       // nothing was changed: the place goes back
       voiceReply = 'Запись не найдена.';
       screenNotification = 'Запись не найдена или не удалена';
@@ -2803,6 +2826,8 @@ ${glossary.join(', ')}
 - 'debt': кто-то должен пользователю деньги. НЕ 'finance' и НЕ 'note'!
   "Арбуз должен мне 100 тысяч", "дал в долг Диме 50к", "100 000 арбуз долг" -> repay: false.
   "Арбуз вернул 30 тысяч", "Дима отдал долг 50к" -> repay: true (человек вернул часть или весь долг).
+  ЛЮБОЕ уменьшение существующего долга — это repay: true, а НЕ новый долг: "Арбуз погасил долг 30 тысяч", "вычти 30 тысяч из долга Арбуза", "минус 30к из долга Димы", "спиши с Арбуза 30 тысяч", "Арбуз перевёл 30к в счёт долга".
+  Если сумма НЕ названа и долг возвращён целиком ("Арбуз вернул весь долг", "Арбуз закрыл долг", "Арбуз больше ничего не должен") -> repay: true, all: true, amount: null. "Арбуз вернул половину долга" -> repay: true, share: 0.5, amount: null.
   owe: false, если должны пользователю. owe: true, если пользователь должен кому-то: "я должен Арбузу 100 тысяч", "занял у Димы 50к" -> repay: false; "я вернул Арбузу 30 тысяч" -> repay: true.
   person: имя или кличка человека в ИМЕНИТЕЛЬНОМ падеже, с большой буквы ('Арбуз', а не 'Арбузу'). amount: число. currency: 'VND' | 'USD' | 'RUB' | 'AED' | 'KZT' | 'UAH' | 'EUR' (по умолчанию '${defaultCurrency}').
 - 'note': мысли, идеи, факты, конспекты, полезная информация, инсайты, БЮДЖЕТЫ И ЛИМИТЫ (то, что нужно запомнить, а НЕ сделать).
@@ -3129,6 +3154,7 @@ async function persistToD1(classification, rawTranscript, coords, env, opts = {}
   let hasDuplicate = false;
   let hasNeedsReview = false;
   let notFound = false;
+  let notFoundDebt = null;   // a repayment for somebody who has no open debt: the reply names the person
   const created = [];   // what got saved, for the Telegram card ({ table, id, ...fields })
 
   for (const action of actions.slice(0, MAX_ACTIONS_PER_RECORD)) {   // one record = one place in the day's limit, so not hundreds of rows
@@ -3336,12 +3362,26 @@ async function persistToD1(classification, rawTranscript, coords, env, opts = {}
           // Same rule as expenses: the amount must be one the user actually said
           if (candidates.length > 0 && !candidates.some(c => Math.abs(c - amount) < 0.01) && candidates.length === 1) amount = candidates[0];
           const currency = SUPPORTED_CURRENCIES.includes(String(data.currency).toUpperCase()) ? String(data.currency).toUpperCase() : (env.DEFAULT_CURRENCY || 'VND');
-          if (!person || !(amount > 0)) { notFound = true; break; }
+          // A share instead of an amount: "вернул весь долг" (1), "вернул половину" (0.5)
+          const share = data.all === true ? 1 : (Number(data.share) > 0 && Number(data.share) <= 1 ? Number(data.share) : 0);
+          // The model sometimes files "Арбуз погасил долг 30 тысяч" as a NEW debt: the phrase itself decides
+          const said = String(rawTranscript || '');
+          const isRepay = !!data.repay || share > 0 || (actions.filter(a => a.type === 'debt').length === 1 && debtRepayIntent(said));
+          if (!person || !(amount > 0 || (isRepay && share > 0))) { notFound = true; break; }
 
-          if (data.repay) {
-            const r = await repayDebts(env, person, amount, currency, owe);
-            if (!r.found) { notFound = true; break; }
-            created.push({ table: 'debts', repay: true, owe, person, amount: r.applied, currency, left: r.left });
+          if (isRepay) {
+            const opt = { share, anyCurrency: !CURRENCY_SAID_RX.test(said) };
+            let dir = owe;
+            let r = await repayDebts(env, person, amount, currency, dir, opt);
+            // Whose debt it is was a guess unless the phrase says "я ..." or "... мне": try the other list
+            if (!r.found && !/(?:^|\s)(?:я|мне)(?=[\s,]|$)/iu.test(said)) {
+              const other = await repayDebts(env, person, amount, currency, !dir, opt);
+              if (other.found) { r = other; dir = !dir; }
+            }
+            if (!r.found) { notFound = true; notFoundDebt = person; break; }
+            // what was really taken off, for the reply ("Возврат долга: Арбуз 30 000 VND, осталось 70 000")
+            Object.assign(data, { repay: true, owe: dir, amount: r.applied, currency: r.currency, left: r.left, parts: r.parts });
+            for (const p of r.parts) created.push({ table: 'debts', repay: true, owe: dir, person, amount: p.applied, currency: p.currency, left: p.left });
             break;
           }
 
@@ -3543,7 +3583,7 @@ async function persistToD1(classification, rawTranscript, coords, env, opts = {}
     }
   }
 
-  return { hasDuplicate, hasNeedsReview, notFound, created };
+  return { hasDuplicate, hasNeedsReview, notFound, notFoundDebt, created };
 }
 
 /** Text of a phrase for request_logs: only the owner's phrases are kept (for debugging); clients' text is never stored. */
@@ -3949,11 +3989,11 @@ async function processTelegramUpdate(update, env, url) {
       const audioForAI = whisperText ? '' : audioBase64;   // STT failed entirely: let Gemini listen
 
       // 4. Classification (same safety net as the Shortcut: "<сумма> <на что>" is always an expense)
-      const classification = enforceExpenseShape(await classifyWithGemini({
+      const classification = await routePhrase({
         text: effectiveText,
         audioBase64: audioForAI,
         mimeType: audioMime
-      }, env), effectiveText, env.DEFAULT_CURRENCY || 'VND');
+      }, effectiveText, env);
 
       const recognizedText = effectiveText || classification.raw_text || '';
       const persisted = await persistToD1(classification, recognizedText, null, env);
@@ -3972,7 +4012,7 @@ async function processTelegramUpdate(update, env, url) {
   if (!text) return jsonResponse({ ok: true });
 
   try {
-    const classification = enforceExpenseShape(await classifyWithGemini(text, env), text, env.DEFAULT_CURRENCY || 'VND');
+    const classification = await routePhrase(text, text, env);
     const persisted = await persistToD1(classification, text, null, env);
     if (persisted?.notFound) await releaseRecordingSlot(env);
     // The user just typed the phrase: no need to quote it back
@@ -4535,7 +4575,9 @@ function savedCard(persisted, rawTranscript, classification, env) {
   }
 
   let text;
-  if (persisted?.notFound) {
+  if (persisted?.notFoundDebt) {
+    text = `Не нашёл открытый долг: <b>${escapeHtml(persisted.notFoundDebt)}</b>. Ничего не поменял.`;
+  } else if (persisted?.notFound) {
     text = 'Не нашёл запись, которую нужно изменить. Ничего не поменял.';
   } else if (lines.length) {
     text = lines.join('\n\n');
@@ -5148,26 +5190,88 @@ async function payDebt(request, env, id) {
  * Voice "Арбуз вернул 30 тысяч": the money goes to that person's open debts, oldest first.
  * Returns { found, applied, left } (left = what the person still owes in that currency).
  */
-async function repayDebts(env, person, amount, currency, owe = false) {
-  const want = String(person || '').toLowerCase().trim();
-  const res = await env.DB.prepare('SELECT * FROM finances WHERE user_id = ? AND is_debt = 1 AND currency = ? AND COALESCE(debt_owe, 0) = ? ORDER BY id ASC').bind(env.uid, currency, owe ? 1 : 0).all();
-  const mine = (res.results || []).filter(d => {
-    if (Number(d.amount) - Number(d.debt_paid || 0) <= 0.005) return false;
-    const name = String(d.title || '').toLowerCase();
-    return want.length >= 2 && name.length >= 2 && (name === want || name.slice(0, 4) === want.slice(0, 4) || wordSimilarity(name, want) >= 0.7);
-  });
-  if (!mine.length) return { found: false, applied: 0, left: 0 };
+async function repayDebts(env, person, amount, currency, owe = false, { share = 0, anyCurrency = false } = {}) {
+  const res = await env.DB.prepare('SELECT * FROM finances WHERE user_id = ? AND is_debt = 1 AND COALESCE(debt_owe, 0) = ? ORDER BY id ASC').bind(env.uid, owe ? 1 : 0).all();
+  const open = (res.results || []).filter(d => Number(d.amount) - Number(d.debt_paid || 0) > 0.005 && samePerson(d.title, person));
+  const none = { found: false, applied: 0, left: 0, currency, parts: [] };
+  if (!open.length) return none;
+  const round2 = (n) => Math.round(n * 100) / 100;
+  const leftOf = (d) => Number(d.amount) - Number(d.debt_paid || 0);
+  const pay = (d, take) => env.DB.prepare('UPDATE finances SET debt_paid = ? WHERE id = ? AND user_id = ?').bind(round2(Number(d.debt_paid || 0) + take), d.id, env.uid).run();
+  const currencies = [...new Set(open.map(d => String(d.currency || '').toUpperCase()))];
+
+  // "вернул весь долг" / "вернул половину": a share of everything that person owes, in every currency
+  if (share > 0) {
+    const parts = [];
+    for (const cur of currencies) {
+      let applied = 0, left = 0;
+      for (const d of open.filter(x => String(x.currency || '').toUpperCase() === cur)) {
+        const take = share >= 1 ? leftOf(d) : round2(leftOf(d) * share);
+        if (take > 0) await pay(d, take);
+        applied += take;
+        left += leftOf(d) - take;
+      }
+      parts.push({ currency: cur, applied: round2(applied), left: Math.max(0, round2(left)) });
+    }
+    return { found: true, ...parts[0], parts };
+  }
+
+  // An amount: oldest debt first. The currency nobody named falls back to the only one this person owes in
+  // ("Арбуз должен мне 100 долларов" ... "Арбуз вернул 50").
+  let cur = String(currency || '').toUpperCase();
+  if (!currencies.includes(cur)) {
+    if (!anyCurrency || currencies.length !== 1) return none;
+    cur = currencies[0];
+  }
+  const mine = open.filter(d => String(d.currency || '').toUpperCase() === cur);
   let rest = amount;
   let applied = 0;
   for (const d of mine) {
     if (rest <= 0) break;
-    const take = Math.min(rest, Number(d.amount) - Number(d.debt_paid || 0));
-    await env.DB.prepare('UPDATE finances SET debt_paid = ? WHERE id = ? AND user_id = ?').bind(Number(d.debt_paid || 0) + take, d.id, env.uid).run();
+    const take = Math.min(rest, leftOf(d));
+    await pay(d, take);
     rest -= take;
     applied += take;
   }
-  const left = mine.reduce((s, d) => s + Number(d.amount) - Number(d.debt_paid || 0), 0) - applied;
-  return { found: true, applied, left: Math.max(0, Math.round(left * 100) / 100) };
+  const left = Math.max(0, round2(mine.reduce((s, d) => s + leftOf(d), 0) - applied));
+  applied = round2(applied);
+  return { found: true, applied, left, currency: cur, parts: [{ currency: cur, applied, left }] };
+}
+
+/** Is this debt's title the person that was named? ("Арбузу" = "Арбуз", "Дима" = "Диме") */
+function samePerson(title, person) {
+  const name = String(title || '').toLowerCase().trim();
+  const want = String(person || '').toLowerCase().trim();
+  return want.length >= 2 && name.length >= 2 && (name === want || name.slice(0, 4) === want.slice(0, 4) || wordSimilarity(name, want) >= 0.7);
+}
+
+/** People with an open debt, either way: [{ title, owe }]. The debt parser uses them to recognise a name in a phrase. */
+async function openDebtPeople(env) {
+  if (!env?.DB) return [];
+  try {
+    const res = await env.DB.prepare(
+      'SELECT DISTINCT title, COALESCE(debt_owe, 0) AS owe FROM finances WHERE user_id = ? AND is_debt = 1 AND amount - COALESCE(debt_paid, 0) > 0.005 ORDER BY id DESC LIMIT 200'
+    ).bind(env.uid).all();
+    return (res.results || []).filter(r => r.title).map(r => ({ title: String(r.title), owe: !!r.owe }));
+  } catch (e) {
+    return [];
+  }
+}
+
+// Words that say "money came back". Strong ones are a repayment by themselves; weak ones ("отдал", "минус", "спиши")
+// also live in ordinary expenses, so they count only next to the word "долг" or the name of somebody with an open debt.
+const wordRx = (alt) => new RegExp(`(?:^|[^а-яёa-z0-9])(?:${alt})(?=[^а-яёa-z0-9]|$)`, 'iu');
+const REPAY_STRONG_RX = wordRx('вернул[аи]?|верн[уё]т|вернет|возврат|возвратил[аи]?|погасил[аи]?|погашен[аоы]?|рассчитал(?:ся|ась|ись)|расплатил(?:ся|ась|ись)|в\\s+сч[её]т\\s+долга');
+const REPAY_WEAK_RX = wordRx('отдал[аи]?|закрыл[аи]?|закрыт[аоы]?|выплатил[аи]?|спиш[иу]|списал[аи]?|списать|вычти|вычесть|вычел|отними|отнять|минус|убавь|уменьши(?:ть)?|скинул[аи]?|закинул[аи]?|перев[её]л[аи]?|прислал[аи]?');
+const DEBT_SETTLED_RX = wordRx('(?:больше|уже)\\s+(?:ничего\\s+)?не\\s+долж(?:ен|на|ны)');
+const DEBT_WHOLE_RX = wordRx('вс[её]|весь|всю|полностью|целиком');
+const DEBT_HALF_RX = wordRx('половин[ауы]|пополам');
+const NUMBER_WORD_RX = /^(?:один|одна|одну|два|две|три|четыре|пять|шесть|семь|восемь|девять|десять|[а-яё]+надцать|двадцать|тридцать|сорок|[а-яё]+десят|девяносто|сто|двести|триста|четыреста|[а-яё]+сот|тысяч[аиу]?|тыс|миллион[а-яё]*|лям[а-яё]*|млн|к|k)$/iu;
+
+/** A phrase that takes money off a debt, whoever classified it ("Арбуз погасил долг 30 тысяч"). */
+function debtRepayIntent(text, knownPerson = false) {
+  const t = String(text || '').toLowerCase();
+  return REPAY_STRONG_RX.test(t) || DEBT_SETTLED_RX.test(t) || (REPAY_WEAK_RX.test(t) && (/долг/u.test(t) || knownPerson));
 }
 
 /**
@@ -5176,15 +5280,34 @@ async function repayDebts(env, person, amount, currency, owe = false) {
  *   "Арбуз вернул 30 тысяч"                                                    -> a repayment
  * Returns a classification, or null when the phrase is not about a debt.
  */
-function parseDebtPhrase(text, defaultCurrency = 'VND') {
+function parseDebtPhrase(text, defaultCurrency = 'VND', people = []) {
   const t = String(text || '').toLowerCase().replace(/[.!?]+$/, '').replace(/\s+/g, ' ').trim();
   if (!t || t.length > 160) return null;
   if (/напомн|надо|нужно|потратил|купил|оплатил|заплатил|перевед|исправ|удали|поменя/u.test(t)) return null;   // a compound phrase goes to the LLM
+
+  // Somebody with an open debt named in the phrase, in any case form ("из долга Арбуза", "Диме")
+  const tokens = t.split(/[^a-zа-яё0-9-]+/iu).filter(w => w.length >= 3 && !NUMBER_WORD_RX.test(w));
+  const known = (people || []).filter(p => {
+    const parts = String(p.title || '').toLowerCase().split(/\s+/).filter(Boolean);
+    return parts.length > 0 && parts.every(part => tokens.some(w => samePerson(part, w)));
+  }).sort((a, b) => b.title.length - a.title.length)[0] || null;
+
+  const hasDebtWord = /долг/u.test(t);
+  const repay = debtRepayIntent(t, !!known) ||
+    (/(?:^|\s)я\s+отдал[а]?(?=\s|$)/u.test(t));   // "я отдал Диме 50к": mine, even before the name is known
+
   const amountRx = /(\d+(?:\s\d{3})*(?:[.,]\d+)?)\s*(к|k|тыс(?:яч[аи]?)?|млн|лям[а-я]*|миллион[а-я]*)?(?![а-яa-z0-9])/iu;
   const am = t.match(amountRx);
-  if (!am) return null;
-  const amount = parseDigitAmount(am[1], am[2]);
-  if (!(amount > 0)) return null;
+  let amount = am ? parseDigitAmount(am[1], am[2]) : parseWordsToNumber(t);   // "тридцать тысяч"
+  // No amount: only a repayment can do without one ("вернул весь долг", "вернул половину", "больше не должен")
+  let share = 0;
+  if (!(amount > 0)) {
+    if (!repay) return null;
+    if (DEBT_HALF_RX.test(t)) share = 0.5;
+    else if (hasDebtWord || DEBT_WHOLE_RX.test(t) || DEBT_SETTLED_RX.test(t)) share = 1;
+    else return null;   // "Арбуз вернул книгу" is not about money
+    amount = 0;
+  }
 
   let currency = defaultCurrency;
   if (/(?:^|\s)руб/.test(t)) currency = 'RUB';
@@ -5194,28 +5317,42 @@ function parseDebtPhrase(text, defaultCurrency = 'VND') {
   else if (/(?:^|\s)(?:гривн|грн|uah)/.test(t)) currency = 'UAH';
   else if (/(?:^|\s)(?:евро|eur)/.test(t)) currency = 'EUR';
 
-  const rest = t.replace(am[0], ' ').replace(/(?:^|\s)(?:донг[а-я]*|vnd|руб[а-я]*|usd|доллар[а-я]*|бакс[а-я]*|aed|дирхам[а-я]*|тенге|kzt|гривн[а-я]*|грн|uah|евро|eur)(?=\s|$)/giu, ' ');
+  const rest = (am ? t.replace(am[0], ' ') : t).replace(/(?:^|\s)(?:донг[а-я]*|vnd|руб[а-я]*|usd|доллар[а-я]*|бакс[а-я]*|aed|дирхам[а-я]*|тенге|kzt|гривн[а-я]*|грн|uah|евро|eur)(?=\s|$)/giu, ' ');
   const stop = new Set(['мне', 'я', 'должен', 'должна', 'должны', 'долг', 'долга', 'долгу', 'в', 'у', 'дал', 'дала', 'одолжил', 'одолжила', 'занял', 'заняла', 'взял', 'взяла',
-    'вернул', 'вернула', 'отдал', 'отдала', 'тебе', 'ему', 'ей', 'нам', 'ещё', 'еще', 'записать', 'запиши', 'за', 'на', 'и', 'теперь', 'тоже', 'короче', 'слушай']);
-  const nameWords = rest.split(/[^a-zа-яё0-9-]+/iu).filter(w => w.length >= 2 && !stop.has(w) && !/^\d+$/.test(w));
-  if (nameWords.length < 1 || nameWords.length > 2) return null;
-  const person = nameWords.join(' ').replace(/(^|\s)\S/g, c => c.toUpperCase());
+    'вернул', 'вернула', 'отдал', 'отдала', 'тебе', 'ему', 'ей', 'нам', 'ещё', 'еще', 'записать', 'запиши', 'за', 'на', 'и', 'теперь', 'тоже', 'короче', 'слушай',
+    // repayments: the verbs and the small words around them are never a name
+    'вернули', 'вернет', 'вернёт', 'вернут', 'отдали', 'возврат', 'возвратил', 'возвратила', 'погасил', 'погасила', 'погасили', 'погашен', 'погашена',
+    'закрыл', 'закрыла', 'закрыли', 'закрыт', 'выплатил', 'выплатила', 'рассчитался', 'рассчиталась', 'расплатился', 'расплатилась',
+    'спиши', 'спишу', 'списал', 'списала', 'списать', 'вычти', 'вычесть', 'вычел', 'отними', 'отнять', 'минус', 'убавь', 'уменьши', 'уменьшить',
+    'скинул', 'скинула', 'закинул', 'закинула', 'перевёл', 'перевел', 'перевела', 'прислал', 'прислала', 'счёт', 'счет', 'из', 'с', 'со', 'от', 'по',
+    'весь', 'всё', 'все', 'всю', 'полностью', 'целиком', 'половину', 'половина', 'половины', 'пополам', 'часть', 'больше', 'уже', 'ничего', 'не',
+    'долги', 'долгов', 'мой', 'свой', 'сегодня', 'вчера', 'наконец', 'деньги', 'денег']);
+  let person;
+  if (known && repay) {
+    person = known.title;   // the spelling the debt already has
+  } else {
+    const nameWords = rest.split(/[^a-zа-яё0-9-]+/iu).filter(w => w.length >= 2 && !stop.has(w) && !/^\d+$/.test(w) && !(am ? false : NUMBER_WORD_RX.test(w)));
+    if (nameWords.length < 1 || nameWords.length > 2) return null;
+    person = nameWords.join(' ').replace(/(^|\s)\S/g, c => c.toUpperCase());
+  }
 
   // The user owes: "я должен Арбузу 100к", "занял у Арбуза 100к", "взял в долг у Арбуза", "я вернул Арбузу 30к"
-  const theyOweMe = /(?:^|\s)мне(?=\s|$)/u.test(t) && /(?:^|\s)должн/u.test(t);
-  const owe = !theyOweMe && (
-    /(?:^|\s)я\s+(?:должен|должна|занял[а-я]*|взял[а-я]*|вернул[а-я]*|отдал[а-я]*)(?=\s|$)/u.test(t) ||
+  const theyOweMe = /(?:^|\s)мне(?=\s|$)/u.test(t) && (repay || /(?:^|\s)должн/u.test(t));
+  const iDid = /(?:^|\s)я\s+(?:должен|должна|занял[а-я]*|взял[а-я]*|вернул[а-я]*|отдал[а-я]*|погасил[а-я]*|закрыл[а-я]*|выплатил[а-я]*|перев[её]л[а-я]*|скинул[а-я]*|закинул[а-я]*|рассчитал[а-я]*|расплатил[а-я]*)(?=\s|$)/u.test(t);
+  let owe = !theyOweMe && (
+    iDid ||
     /^(?:должен|должна)\s/u.test(t) ||
     /(?:^|\s)(?:занял[а-я]*|взял[а-я]*)\s+(?:в\s+долг\s+)?у(?=\s)/u.test(t) ||
     /(?:^|\s)взял[а-я]*\s+в\s+долг(?=\s|$)/u.test(t));
-  const mk = (repay) => ({
+  // Nobody said whose debt it is ("вернул Диме 80 тысяч", "минус 30 тысяч из долга Арбуза"): the open debt itself tells
+  if (repay && known && !theyOweMe && !iDid) owe = known.owe;
+  const mk = (isRepay) => ({
     raw_text: text, type: 'debt', haptic: 'success',
-    actions: [{ type: 'debt', data: { person, amount, currency, repay, owe }, evidence: t }]
+    actions: [{ type: 'debt', data: { person, amount, currency, repay: isRepay, owe, ...(share ? { share } : {}) }, evidence: t }]
   });
-  // "отдал" alone is an ordinary expense ("отдал 50к за обед"): it counts only together with the word "долг" (or "я отдал")
-  if (/(?:^|\s)(?:вернул[аи]?|верн[уё]т)(?=\s|$)/u.test(t) || (/(?:^|\s)отдал[аи]?(?=\s|$)/u.test(t) && (/долг/u.test(t) || owe))) {
-    return mk(true);
-  }
+  // "отдал" alone is an ordinary expense ("отдал 50к за обед"): debtRepayIntent counts it only with the word "долг",
+  // a known name, or "я отдал"
+  if (repay) return mk(true);
   if (owe && /(?:^|\s)(?:должен|должна|занял[а-я]*|взял[а-я]*)(?=\s|$)/u.test(t)) return mk(false);
   if (/(?:^|\s)(?:должен|должна|должны|долг|дал[а-я]*\s+в\s+долг|одолжил[а-я]*|занял[а-я]*)(?=\s|$)/u.test(t)) return mk(false);
   return null;

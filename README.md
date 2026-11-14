@@ -86,7 +86,7 @@ Open `http://localhost:8787/app?token=<AUTH_TOKEN>` at a phone width.
 npm test
 ```
 
-174 tests run on `node:test` with `node:sqlite` in place of D1 and a mocked `fetch`. GitHub Actions runs them on every push.
+195 tests run on `node:test` with `node:sqlite` in place of D1 and a mocked `fetch`. GitHub Actions runs them on every push.
 
 ## Status
 
