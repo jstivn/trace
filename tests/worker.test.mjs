@@ -1292,6 +1292,41 @@ test('isolation: what B dictates is saved for B, and the LLM context never conta
   assert.doesNotMatch(previews, /вода/);
 });
 
+test('prompt: a person in Moscow is not told they live in Nha Trang (own zone, own currency, no owner glossary)', async () => {
+  const env = twoUsers();
+  env.DB.raw.exec("update users set timezone = 'Europe/Moscow', currency = 'RUB' where id = 2");
+  const sent = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => { if (/generativelanguage|gateway\.ai/.test(String(url))) sent.push(String(opts?.body || '')); return realFetch(url, opts); };
+  const promptOf = (body) => JSON.parse(body).systemInstruction.parts[0].text;
+  let promptB, promptA;
+  try {
+    aiReply = { actions: [{ type: 'task', data: { title: 'Найти Спарк у дилера' } }] };
+    await asB(env, 'POST', '/api/voice-hook', { text: 'надо найти спарк у дилера' });
+    promptB = promptOf(sent.at(-1));
+    aiReply = { actions: [{ type: 'task', data: { title: 'Написать в спарк' } }] };
+    await call(env, 'POST', '/api/voice-hook', { text: 'надо написать в спарк' });
+    promptA = promptOf(sent.at(-1));
+  } finally { globalThis.fetch = realFetch; }
+
+  // B: Moscow, roubles, nothing of the owner's surroundings
+  assert.doesNotMatch(promptB, /Нячанг|Nha Trang|Камран|CXR|Sparc|Meta Ad Library|UTC\+7|\+07:00|VND"|донг/);
+  assert.match(promptB, /UTC\+3 \(Europe\/Moscow\)/);
+  assert.match(promptB, /'\+03:00'/);
+  assert.match(promptB, /145000 RUB/);
+  // "завтра в 11" in the example is 08:00 UTC for Moscow
+  assert.match(promptB, /"due_datetime": "\d{4}-\d{2}-\d{2}T08:00:00Z"/);
+  // the owner's word corrections do not touch B's records
+  assert.equal(one(env, 'select title t from tasks where user_id = 2 order by id desc limit 1').t, 'Найти Спарк у дилера');
+
+  // A (the owner, Nha Trang): everything as before
+  assert.match(promptA, /Пользователь живет в Нячанге/);
+  assert.match(promptA, /UTC\+7/);
+  assert.match(promptA, /"due_datetime": "\d{4}-\d{2}-\d{2}T04:00:00Z"/);
+  assert.match(promptA, /145000 VND/);
+  assert.equal(one(env, 'select title t from tasks where user_id = 1 order by id desc limit 1').t, 'Написать в Sparc');
+});
+
 test('access: a new Telegram user can look around but not record until they have a trial or subscription', async () => {
   const env = twoUsers();
   const talk = async (chatId, text) => {

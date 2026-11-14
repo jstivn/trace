@@ -1438,6 +1438,26 @@ function detectAudioMime(base64Str, defaultMime = 'audio/m4a') {
 
 const CATEGORY_CONFIDENCE_THRESHOLD = 0.7;
 const STT_HINT = 'Расходы и долги: еда, вода, кофе, такси, долг, Арбуз вернул долг. Нячанг, Камрань, CXR, Sparc, Meta Ad Library.';
+// Everybody else: the same hint without the owner's own names and places (Whisper tends to "hear" the words of its hint)
+const STT_HINT_COMMON = 'Расходы и долги: еда, вода, кофе, такси, долг, вернул долг.';
+const OWNER_GLOSSARY = ['Камрань (CXR)', 'Sparc', 'Meta Ad Library'];
+
+/**
+ * True when the owner's own surroundings apply: Nha Trang, its airport, the owner's glossary.
+ * Only the owner living in that zone gets them; for anybody else they are noise in the prompts and wrong "corrections".
+ * (An env that is not scoped to a person is the owner's: the old single-user path.)
+ */
+const ownerPlace = (env) => (env?.uid === undefined || env.uid === OWNER_ID) &&
+  (env?.USER_TIMEZONE || 'Asia/Ho_Chi_Minh') === 'Asia/Ho_Chi_Minh';
+
+/** 180 -> { label: 'UTC+3', iso: '+03:00' }; 330 -> { label: 'UTC+5:30', iso: '+05:30' } */
+function utcOffsetText(minutes) {
+  const m = Math.round(Number(minutes)) || 0;
+  const sign = m < 0 ? '-' : '+';
+  const h = Math.floor(Math.abs(m) / 60);
+  const mm = String(Math.abs(m) % 60).padStart(2, '0');
+  return { label: `UTC${sign}${h}${mm === '00' ? '' : ':' + mm}`, iso: `${sign}${String(h).padStart(2, '0')}:${mm}` };
+}
 // A currency the user really said; without one the LLM may not pick a foreign currency ("70 тысяч долл карбуз" became 70 000 USD)
 const CURRENCY_SAID_RX = /(?:^|[\s\d])(?:донг|vnd|руб|р(?=[\s.,]|$)|usd|доллар|dollar|бакс|aed|дирхам|тенге|kzt|гривн|грн|uah|евро|eur)|[$€₽₫]/iu;
 
@@ -1453,7 +1473,7 @@ async function transcribeSpeech(audioBytes, audioMime, vocabList, env) {
   const sttLanguage = sttLangEnv === 'auto' ? '' : sttLangEnv;
   // Whisper hears short phrases through this hint. Learned words stay out of it: "dog" from the dictionary turned "долг" into "дог".
   // Echo on silence is caught by isSttHallucination; the hint has no numbers, so an echo cannot become an expense.
-  const vocabPrompt = STT_HINT;
+  const vocabPrompt = ownerPlace(env) ? STT_HINT : STT_HINT_COMMON;
 
   // 1. Try Groq Whisper Large V3 if GROQ_API_KEY is configured
   if (env.GROQ_API_KEY) {
@@ -2121,8 +2141,10 @@ function enforceExpenseShape(classification, text, defaultCurrency) {
 /**
  * Vocabulary post-correction: touch ONLY glossary words, leave rest unchanged
  */
-function postCorrectTranscript(text, vocabList = []) {
+function postCorrectTranscript(text, vocabList = [], env = null) {
   if (!text) return text;
+  // These are the owner's own names: for anybody else "спарк" is not Sparc and Cam Ranh needs no airport code
+  if (env && !ownerPlace(env)) return text;
   let res = text;
 
   // 1. Камрань (CXR)
@@ -2342,7 +2364,7 @@ async function handleVoiceHook(request, env, opts = {}) {
     }
 
     // Fetch vocabulary glossary first for STT prompt context and post-correction
-    let vocabList = ['Камрань (CXR)', 'Sparc', 'Meta Ad Library'];
+    let vocabList = ownerPlace(env) ? OWNER_GLOSSARY : [];
     try {
       if (env.DB) {
         const vRes = await env.DB.prepare('SELECT word FROM vocabulary WHERE user_id = ?').bind(env.uid).all();
@@ -2416,7 +2438,7 @@ async function handleVoiceHook(request, env, opts = {}) {
     const pristineRawTranscript = effectiveText || whisperText || '';
 
     // Post-correct transcript for glossary terms (used only for AI routing / title normalization)
-    const correctedEffectiveText = postCorrectTranscript(effectiveText, vocabList);
+    const correctedEffectiveText = postCorrectTranscript(effectiveText, vocabList, env);
 
     // Process text or audio through AI Router:
     const audioForAI = whisperText ? '' : audioBase64;
@@ -2667,6 +2689,17 @@ async function classifyWithGemini(input, env) {
   }).format(now);
   const nowIso = now.toISOString();
   const defaultCurrency = env.DEFAULT_CURRENCY || 'VND';
+  // The person's own zone, not the owner's: the model counts "в 14:00" from this label when the code parser gives up
+  const offMin = tzOffsetMinutes(userTimezone, now);
+  const utc = utcOffsetText(offMin);
+  const local = ownerPlace(env);
+  const localNow = new Date(now.getTime() + offMin * 60000);
+  // "завтра в 11" of this person, as the UTC moment the model must return
+  const exampleDue = new Date(Date.UTC(localNow.getUTCFullYear(), localNow.getUTCMonth(), localNow.getUTCDate() + 1, 11, 0) - offMin * 60000)
+    .toISOString().replace('.000Z', 'Z');
+  const glossary = input?.vocabList || (local ? OWNER_GLOSSARY : []);
+  const cityFrom = local ? 'Камрани' : 'Казани';
+  const ticketsTitle = local ? 'Найти билеты из Камрани (CXR) туда и обратно на конец ноября' : 'Найти билеты из Казани туда и обратно на конец ноября';
 
   const systemPrompt = `Ты — ядро персонального ассистента TRACE. Твоя задача — классифицировать входящее голосовое сообщение (аудиозапись или текст) в строгий JSON.
 Пользователь может сказать ОДНО действие (расход, задача, перевод, заметка) ИЛИ СРАЗУ НЕСКОЛЬКО действий в одном сообщении (поток сознания, напр. напоминание + идея + расход).
@@ -2674,17 +2707,17 @@ async function classifyWithGemini(input, env) {
 СТРОГИЕ ПРАВИЛА:
 1. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать любые emoji / смайлики в любых полях. Только чистый текст без смайлов.
 2. ВРЕМЯ И ГЕОГРАФИЯ:
-   - Пользователь живет в Нячанге (Nha Trang, Вьетнам, часовой пояс UTC+7, ${userTimezone}).
-   - Главный местный аэропорт Нячанга — Камрань (Cam Ranh, код IATA: CXR).
-   - Текущее местное время пользователя: ${localNowStr} (UTC+7).
+${local ? `   - Пользователь живет в Нячанге (Nha Trang, Вьетнам, часовой пояс ${utc.label}, ${userTimezone}).
+   - Главный местный аэропорт Нячанга — Камрань (Cam Ranh, код IATA: CXR).` : `   - Часовой пояс пользователя: ${utc.label} (${userTimezone}). Где он живет, неизвестно: не предполагай город или страну.`}
+   - Текущее местное время пользователя: ${localNowStr} (${utc.label}).
    - Текущее UTC время: ${nowIso}.
-   - Все относительные упоминания времени ("через 15 минут", "в 14:00", "завтра в 10 утра", "вечером", "в выходные", "конец ноября") вычисляй СТРОГО от местного времени пользователя (${localNowStr}, UTC+7)!
-   - Поле due_datetime для задач возвращай в формате ISO 8601 UTC (например, '2026-10-26T13:00:00Z') либо с оффсетом '+07:00'.
-3. Валюта по умолчанию: ${defaultCurrency}. Примеры сумм: "145 тысяч еда" -> 145000 VND. "10 тысяч рублей" -> 10000 RUB.
+   - Все относительные упоминания времени ("через 15 минут", "в 14:00", "завтра в 10 утра", "вечером", "в выходные", "конец ноября") вычисляй СТРОГО от местного времени пользователя (${localNowStr}, ${utc.label})!
+   - Поле due_datetime для задач возвращай в формате ISO 8601 UTC (например, '2026-10-26T13:00:00Z') либо с оффсетом '${utc.iso}'.
+3. Валюта по умолчанию: ${defaultCurrency}. Примеры сумм: "145 тысяч еда" -> 145000 ${defaultCurrency}. "10 тысяч рублей" -> 10000 RUB.
 4. РАСПОЗНАВАНИЕ РЕЧИ И ТРАНСКРИПЦИЯ (ОЧЕНЬ ВАЖНО):
    - Если предоставлена аудиозапись, ОБЯЗАТЕЛЬНО запиши в корень JSON поле "raw_text", содержащее точную расшифровку того, что сказал пользователь.
-   - Понимай естественную разговорную русскую речь со сленгом, местной вьетнамской спецификой и английскими терминами:
-     "Нечанг" -> Нячанг, "комране" -> Камрань (CXR), "наконец на ебре" -> "конец ноября", "вайб" -> "vibe", "детейлинг" -> "detailing", "PPF", "tow truck", "resilient", "pink", "silent".
+   - Понимай естественную разговорную русскую речь со сленгом${local ? ', местной вьетнамской спецификой' : ''} и английскими терминами:
+     ${local ? '"Нечанг" -> Нячанг, "комране" -> Камрань (CXR), ' : ''}"наконец на ебре" -> "конец ноября", "вайб" -> "vibe", "детейлинг" -> "detailing", "PPF", "tow truck", "resilient", "pink", "silent".
    - Игнорируй звуки-паразиты (эээ, ммм, вздохи, паузы).
    - Если пользователь сам исправил себя во время речи ("потратил сто... нет, двести рублей"), фиксируй итоговый исправленный факт.
 5. РАЗДЕЛЕНИЕ СОСТАВНЫХ СООБЩЕНИЙ И ВВОДНЫЕ СЛОВА (КРИТИЧЕСКИ ВАЖНО):
@@ -2695,7 +2728,7 @@ async function classifyWithGemini(input, env) {
      Результат:
      "actions": [
        { "type": "note", "data": { "category": "idea", "title": "Новый вайб для лендинга", "content": "Сделать новый крутой вайб для посадочной страницы (лендинга), создавая современную эстетику и атмосферу...", "tags": "дизайн, лендинг, идея" } },
-       { "type": "task", "data": { "title": "Позвонить дизайнеру", "due_datetime": "2026-10-27T04:00:00Z", "priority": "medium" } },
+       { "type": "task", "data": { "title": "Позвонить дизайнеру", "due_datetime": "${exampleDue}", "priority": "medium" } },
        { "type": "translate", "data": { "word": "Silent", "phonetic": "[са́йлент]", "translation": "Тихий", "example": "Stay silent during the speech. (Соблюдайте тишину во время речи.)" } }
      ]
    - НИКОГДА не объединяй составной запрос в одну общую заметку-мысль, если в нем явно присутствуют слова "напомни/позвонить" (task) или "переведи/слово" (translate) или "потратил" (finance)!
@@ -2707,7 +2740,7 @@ async function classifyWithGemini(input, env) {
 
 7. СТРОГИЙ ЗАПРЕТ НА ВЫДУМЫВАНИЕ СУЩНОСТЕЙ (GROUNDING):
    - Категорически запрещено выдумывать страны, города или сущности, которых пользователь НЕ называл!
-   - Если направление или часть фразы неразборчива (напр. "билеты из Камрани всю и обратно"), ЗАПРЕЩЕНО выдумывать Румынию! Напиши четко: "Найти билеты из Камрани (CXR) туда и обратно на конец ноября" либо сохрани фразу пользователя.
+   - Если направление или часть фразы неразборчива (напр. "билеты из ${cityFrom} всю и обратно"), ЗАПРЕЩЕНО выдумывать Румынию! Напиши четко: "${ticketsTitle}" либо сохрани фразу пользователя.
 
 8. КОРРЕКТИРОВКА, ПЕРЕЗАПИСЬ И УДАЛЕНИЕ РАНЕЕ СОЗДАННЫХ ЗАПИСЕЙ (ОЧЕНЬ ВАЖНО):
    - Если пользователь просит исправить, перезаписать, скорректировать, изменить или удалить предыдущую запись (например: "Перезаписываю, я там записывал 150 000 на еду 5 минут назад, поменяй на 200 000", "Не 150к, а 200к на еду", "Исправь последнюю задачу на...", "Удали расход на кофе", "Я ошибся, запиши вместо 100 рублей 200"):
@@ -2720,7 +2753,7 @@ async function classifyWithGemini(input, env) {
           "target_id": 15,
           "data": {
             "amount": 200000,
-            "currency": "VND",
+            "currency": "${defaultCurrency}",
             "category": "food",
             "raw_text": "200 тысяч еда (исправлено)"
           }
@@ -2731,14 +2764,14 @@ async function classifyWithGemini(input, env) {
           "target_table": "finances" | "tasks" | "notes",
           "target_id": 15
         }
-     5. В voice_reply дай четкое подтверждение для Siri: "Расход изменен на 200 тысяч донгов" / "Задача обновлена" / "Запись удалена".
-     6. В screen_notification: "Исправлен расход: 200 000 VND (еда)".
+     5. В voice_reply дай четкое подтверждение для Siri: "Расход изменен на 200 тысяч${local ? ' донгов' : ''}" / "Задача обновлена" / "Запись удалена".
+     6. В screen_notification: "Исправлен расход: 200 000 ${defaultCurrency} (еда)".
 
 ${recentContext ? `\n` + recentContext + `\n` : ''}
 
-СЛОВАРЬ (собственные имена, локации, бренды — используй точные написания):
-${(input?.vocabList || ['Камрань (CXR)', 'Sparc', 'Meta Ad Library']).join(', ')}
-
+${glossary.length ? `СЛОВАРЬ (собственные имена, локации, бренды — используй точные написания):
+${glossary.join(', ')}
+` : ''}
 ПРАВИЛО НЕВЫДУМЫВАНИЯ:
 Что пользователь не назвал, то строго null! КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО придумывать даты, время и суммы!
 Если названа только дата без времени («на конец ноября», «завтра», «на выходных») — due_datetime возвращай строго в формате 'YYYY-MM-DD' без указания времени (date-only)!
@@ -2758,7 +2791,7 @@ ${(input?.vocabList || ['Камрань (CXR)', 'Sparc', 'Meta Ad Library']).joi
   needs_review: true если сомневаешься в категории или сумме, иначе false.
 - 'task': любое дело, действие, поручение, намерение или напоминание (с дедлайном или без).
   ПРАВИЛО: Если во фразе есть "надо", "нужно", "сделать", "купить", "найти", "съездить", "позвонить", "сфоткать", "отправить", "забрать", "записаться" — это ВСЕГДА 'task', а НЕ 'note'!
-  title: четкая, емкая формулировка задачи в инфинитиве (например: 'Найти билеты из Камрани (CXR) туда и обратно на конец ноября', 'Съездить в выходные за теплыми вещами', БЕЗ смайлов и БЕЗ разговорного мусора вроде 'мне такое задачу', 'Привет, запиши').
+  title: четкая, емкая формулировка задачи в инфинитиве (например: '${ticketsTitle}', 'Съездить в выходные за теплыми вещами', БЕЗ смайлов и БЕЗ разговорного мусора вроде 'мне такое задачу', 'Привет, запиши').
   due_datetime: если названа дата без времени — строго 'YYYY-MM-DD'. Если названо конкретное время — ISO 8601 UTC. Если дата не названа — строго null!
   priority: 'low' | 'medium' | 'high' (по умолчанию 'medium').
   confidence: число уверенности от 0.0 до 1.0.
@@ -2774,7 +2807,7 @@ ${(input?.vocabList || ['Камрань (CXR)', 'Sparc', 'Meta Ad Library']).joi
   person: имя или кличка человека в ИМЕНИТЕЛЬНОМ падеже, с большой буквы ('Арбуз', а не 'Арбузу'). amount: число. currency: 'VND' | 'USD' | 'RUB' | 'AED' | 'KZT' | 'UAH' | 'EUR' (по умолчанию '${defaultCurrency}').
 - 'note': мысли, идеи, факты, конспекты, полезная информация, инсайты, БЮДЖЕТЫ И ЛИМИТЫ (то, что нужно запомнить, а НЕ сделать).
   category: 'idea' | 'fact' | 'credentials' | 'thought'.
-  title: емкий заголовок темы (2-5 слов, БЕЗ смайлов, например: 'Идея по Sparc').
+  title: емкий заголовок темы (2-5 слов, БЕЗ смайлов, например: '${local ? 'Идея по Sparc' : 'Идея для сайта'}').
   content: ТОЧНЫЕ СЛОВА ПОЛЬЗОВАТЕЛЯ. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО приукрашивать текст, придумывать канцеляризмы («профессиональные услуги», «оптимизация бизнес-процессов»), писать от третьего лица («Создана тестовая заметка...», «Пользователь предлагает...»), добавлять «Запиши идею:». Сохраняй суть ровно так, как сформулировал пользователь, убрав только междометия и вводные слова («слушай», «короче», «запиши»). Без ведущих пробелов и отступов!
   tags: ключевые теги через запятую (максимум 2 тега).
 - 'update': корректировка или перезапись ранее созданной записи из базы.
@@ -2798,7 +2831,7 @@ ${(input?.vocabList || ['Камрань (CXR)', 'Sparc', 'Meta Ad Library']).joi
   ],
   "haptic": "success" | "warning",
   "voice_reply": "Краткая фраза для озвучки Siri до 8 слов (строго БЕЗ смайлов)",
-  "screen_notification": "Информативный статус (напр. 'Исправлен расход: 200 000 VND', разделитель ' | ' если несколько действий, строго БЕЗ смайлов)"
+  "screen_notification": "Информативный статус (напр. 'Исправлен расход: 200 000 ${defaultCurrency}', разделитель ' | ' если несколько действий, строго БЕЗ смайлов)"
 }
 ВАЖНО: Выведи СТРОГО чистый JSON-объект без пояснений и без markdown. Ответ ОБЯЗАН начинаться с { и заканчиваться }.`;
 
@@ -3209,8 +3242,8 @@ async function persistToD1(classification, rawTranscript, coords, env, opts = {}
 
         case 'task': {
           let title = stripEmojis(data.title || rawTranscript) || 'Новая задача';
-          title = postCorrectTranscript(title);
-          
+          title = postCorrectTranscript(title, [], env);
+
           // Deterministic date & time parse (code calculates exact moment)
           const taskCount = actions.filter(a => a.type === 'task').length;
           const codeDate = parseRelativeDate(taskDateContext(data, rawTranscript, taskCount), new Date(), env.tzHours);
@@ -3349,8 +3382,8 @@ async function persistToD1(classification, rawTranscript, coords, env, opts = {}
             .replace(/^(?:запиши(?: мне)? (?:идею|мысль|заметку|факт|напоминание)?[:\s]*|идея[:\s]*|мысль[:\s]*|заметка[:\s]*|факт[:\s]*)/iu, '')
             .trim();
 
-          title = postCorrectTranscript(title);
-          content = postCorrectTranscript(content);
+          title = postCorrectTranscript(title, [], env);
+          content = postCorrectTranscript(content, [], env);
           const tags = stripEmojis(data.tags || '');
           const confidence = typeof data.confidence === 'number' ? data.confidence : 1.0;
 
@@ -3896,7 +3929,7 @@ async function processTelegramUpdate(update, env, url) {
       // 3. Transcribe speech using multi-provider cascade (Groq -> CF Whisper Large Turbo)
       let whisperText = '';
       try {
-        let vocabList = ['Камрань (CXR)', 'Sparc', 'Meta Ad Library'];
+        let vocabList = ownerPlace(env) ? OWNER_GLOSSARY : [];
         if (env.DB) {
           const vRes = await env.DB.prepare('SELECT word FROM vocabulary WHERE user_id = ?').bind(env.uid).all();
           if (vRes?.results) vocabList = vRes.results.map(r => r.word);
